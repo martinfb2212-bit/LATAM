@@ -216,7 +216,18 @@ def load_and_validate(uploaded):
     df["delivery_week"]  = pd.to_numeric(df["delivery_week"],  errors="coerce")
     df["total_quantity"] = pd.to_numeric(df["total_quantity"], errors="coerce").fillna(0)
     df["total_price"]    = pd.to_numeric(df["total_price"],    errors="coerce").fillna(0)
-    df["country"]        = df["destination"].str.upper().map(IATA_COUNTRY).fillna("Unknown")
+    # Extract the 3-letter IATA code robustly from whatever format the cell has
+    df["iata_code"] = (
+        df["destination"]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+        .str.extract(r'\b([A-Z]{3})\b', expand=False)   # first 3-letter word/token
+        .fillna(
+            df["destination"].astype(str).str.upper().str.strip().str[:3]  # fallback: first 3 chars
+        )
+    )
+    df["country"] = df["iata_code"].map(IATA_COUNTRY).fillna("Unknown")
     return df, ""
 
 def filter_week(df, year, week):
@@ -249,7 +260,7 @@ def render_by_destination(df, accent):
     countries = sorted(df["country"].unique())
     for country in countries:
         cdf = df[df["country"] == country]
-        airports = sorted(cdf["destination"].str.upper().unique())
+        airports = sorted(cdf["iata_code"].dropna().unique())
         fl = flag(country)
 
         # Country header
@@ -267,7 +278,7 @@ def render_by_destination(df, accent):
         </div>""", unsafe_allow_html=True)
 
         for airport in airports:
-            adf = cdf[cdf["destination"].str.upper() == airport]
+            adf = cdf[cdf["iata_code"] == airport]
             with st.expander(f"✈  {airport}  —  {len(adf)} order{'s' if len(adf)!=1 else ''}  ·  {int(adf['total_quantity'].sum()):,} units  ·  $ {adf['total_price'].sum():,.0f}", expanded=len(airports)==1):
                 st.dataframe(build_display_df(adf), use_container_width=True, hide_index=True)
 
@@ -440,7 +451,7 @@ with all_tabs[0]:
     section_hdr("Destination Breakdown · All Active Weeks", "#8A9E85")
     if not all_5w.empty:
         dest_summary = (
-            all_5w.groupby(["country","destination"])
+            all_5w.groupby(["country","iata_code"])
             .agg(orders=("total_price","count"), units=("total_quantity","sum"), fob=("total_price","sum"))
             .reset_index()
             .sort_values(["country","fob"], ascending=[True, False])
@@ -448,7 +459,7 @@ with all_tabs[0]:
         dest_summary["flag"] = dest_summary["country"].map(lambda c: flag(c))
         dest_summary["Country"] = dest_summary["flag"] + "  " + dest_summary["country"]
         dest_summary = dest_summary.rename(columns={
-            "destination":"Airport","orders":"Orders",
+            "iata_code":"Airport","orders":"Orders",
             "units":"Units","fob":"FOB (USD)"
         })
         dest_summary["FOB (USD)"] = dest_summary["FOB (USD)"].apply(lambda x: f"$ {x:,.0f}")
