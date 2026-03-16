@@ -1276,65 +1276,63 @@ def render_logistics(df_all):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# AUTH — minimal, diagnostic-friendly
+# AUTH — uses secrets.toml on Streamlit Cloud, plain comparison elsewhere
 # ════════════════════════════════════════════════════════════════════════════
 USERS_FILE = pathlib.Path(".streamlit/users.json")
 
-def hash_pw(pw: str) -> str:
-    return hashlib.sha256(pw.strip().encode()).hexdigest()
-
-# Hardcoded fallback users — always available, no files, no secrets needed
-FALLBACK_USERS = {
-    "admin": {
-        "hash":    "a3d7c521c0f124edddd0acb0a97765f8e2c78cf16f8f99dcd0b7be8c1e46dde5",
-        "display": "Administrator",
-        "role":    "admin",
-    }
+# ── Hardcoded users dict — always works, no hashing at startup ───────────────
+# Passwords stored as plain text here ONLY as a bootstrap fallback.
+# Once you set secrets.toml these are ignored.
+_BUILTIN_USERS = {
+    "admin":      {"password": "admin123",   "display": "Administrator", "role": "admin"},
+    "logistics":  {"password": "log2024",    "display": "Logistics",     "role": "user"},
+    "commercial": {"password": "com2024",    "display": "Commercial",    "role": "user"},
 }
-# The hash above = sha256("admin123")
-# Verified: hashlib.sha256("admin123".encode()).hexdigest()
-# = a3d7c521c0f124edddd0acb0a97765f8e2c78cf16f8f99dcd0b7be8c1e46dde5
 
 def _get_users() -> dict:
-    # 1. Session state (highest priority — set by admin panel)
-    if st.session_state.get("_users"):
-        return st.session_state["_users"]
-    # 2. Local file
+    """
+    Returns dict of {username: {password, display, role}}.
+    Passwords are plain text — compared directly, no hashing required.
+    Priority: secrets.toml → users.json → _BUILTIN_USERS
+    """
+    # 1 ── Streamlit secrets (Streamlit Cloud)
+    try:
+        raw = st.secrets.get("users", {})
+        if raw:
+            out = {}
+            for u, v in raw.items():
+                u = str(u).strip().lower()
+                if isinstance(v, str):
+                    out[u] = {"password": v, "display": u.title(), "role": "user"}
+                else:
+                    out[u] = {
+                        "password": str(v.get("password", "")),
+                        "display":  str(v.get("display",  u.title())),
+                        "role":     str(v.get("role",     "user")),
+                    }
+            if out:
+                return out
+    except Exception:
+        pass
+
+    # 2 ── Local JSON file (self-hosted / local dev)
     if USERS_FILE.exists():
         try:
             data = json.loads(USERS_FILE.read_text())
             if data:
-                st.session_state["_users"] = data
                 return data
         except Exception:
             pass
-    # 3. Streamlit secrets
-    try:
-        raw = dict(st.secrets.get("users", {}))
-        if raw:
-            out = {}
-            for u, v in raw.items():
-                u = u.lower().strip()
-                out[u] = {
-                    "hash":    str(v) if isinstance(v, str) else str(v.get("hash", "")),
-                    "display": u.title() if isinstance(v, str) else str(v.get("display", u.title())),
-                    "role":    "user"   if isinstance(v, str) else str(v.get("role", "user")),
-                }
-            st.session_state["_users"] = out
-            return out
-    except Exception:
-        pass
-    # 4. Hardcoded fallback
-    st.session_state["_users"] = dict(FALLBACK_USERS)
-    return st.session_state["_users"]
+
+    # 3 ── Built-in fallback (always works)
+    return dict(_BUILTIN_USERS)
 
 def _save_users(users: dict):
-    st.session_state["_users"] = users
     try:
         USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
         USERS_FILE.write_text(json.dumps(users, indent=2))
     except Exception:
-        pass  # read-only fs on Streamlit Cloud — session is enough
+        pass  # read-only on Streamlit Cloud — that's fine, secrets.toml is used there
 
 def check_credentials(username: str, password: str) -> bool:
     if not username or not password:
@@ -1343,11 +1341,13 @@ def check_credentials(username: str, password: str) -> bool:
     u = username.strip().lower()
     if u not in users:
         return False
-    return users[u]["hash"] == hash_pw(password)
+    stored = users[u].get("password", "")
+    return stored == password.strip()
 
 def get_user(username: str) -> dict:
-    return _get_users().get(username.strip().lower(),
-                            {"display": username.title(), "role": "user"})
+    users = _get_users()
+    return users.get(username.strip().lower(),
+                     {"display": username.title(), "role": "user"})
 
 # ── Login screen ──────────────────────────────────────────────────────────────
 def render_login():
@@ -1384,24 +1384,15 @@ def render_login():
             submitted = st.form_submit_button("Sign In →", use_container_width=True)
 
         if submitted:
-            u = username.strip().lower()
-            p = password.strip()
-            users = _get_users()
-            entered_hash = hash_pw(p)
-
-            if u in users and users[u]["hash"] == entered_hash:
+            if check_credentials(username, password):
                 st.session_state["authenticated"] = True
-                st.session_state["username"]      = u
+                st.session_state["username"]      = username.strip().lower()
                 st.session_state["login_failed"]  = False
                 st.rerun()
             else:
                 st.session_state["login_failed"] = True
-                # Show diagnostic info (remove after testing)
-                st.error(f"Login failed. User '{u}' found: {u in users}")
-                if u in users:
-                    st.code(f"Expected: {users[u]['hash']}\nEntered:  {entered_hash}")
 
-        if st.session_state.get("login_failed") and not submitted:
+        if st.session_state.get("login_failed"):
             st.markdown("""
             <div style="background:#FFF5F5;border-left:3px solid #8C3D3D;padding:10px 14px;
                         font-family:'Jost',sans-serif;font-size:.78rem;color:#8C3D3D;
@@ -1440,9 +1431,9 @@ def render_admin():
             st.warning("Password required for new users.")
         else:
             users[u] = {
-                "hash":    hash_pw(new_pw) if new_pw else users.get(u, {}).get("hash", ""),
-                "display": new_display.strip() or u.title(),
-                "role":    new_role,
+                "password": new_pw if new_pw else users.get(u, {}).get("password", ""),
+                "display":  new_display.strip() or u.title(),
+                "role":     new_role,
             }
             _save_users(users)
             st.success(f"User **{u}** saved.")
@@ -1473,7 +1464,7 @@ def render_admin():
         elif len(new_pw2) < 6:
             st.warning("Password must be at least 6 characters.")
         else:
-            users[me]["hash"] = hash_pw(new_pw2)
+            users[me]["password"] = new_pw2
             _save_users(users)
             st.success("Password updated.")
 
