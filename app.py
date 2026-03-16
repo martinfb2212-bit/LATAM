@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, date
 import io
-import hashlib
 import streamlit.components.v1 as components
 
 st.set_page_config(
@@ -12,220 +11,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-# ════════════════════════════════════════════════════════════════════════════
-# AUTH — multi-user, works on Streamlit Cloud, self-hosted, and local
-# ════════════════════════════════════════════════════════════════════════════
-import json, os, pathlib
-
-def hash_pw(pw: str) -> str:
-    return hashlib.sha256(pw.strip().encode()).hexdigest()
-
-# ── User store: secrets (cloud) → local JSON file → in-memory fallback ───────
-USERS_FILE = pathlib.Path(".streamlit/users.json")
-
-def _load_users() -> dict:
-    """
-    Priority:
-    1. st.secrets["users"] — Streamlit Cloud / secrets.toml
-    2. .streamlit/users.json — self-hosted / local persistent file
-    3. st.session_state["_users_mem"] — in-memory fallback (resets on restart)
-    Returns dict: {username_lower: {"hash": ..., "display": ..., "role": ...}}
-    """
-    # 1 — Streamlit secrets
-    try:
-        raw = st.secrets["users"]
-        # Support both flat {user: hash} and rich {user: {hash, display, role}}
-        out = {}
-        for u, v in raw.items():
-            u = u.lower()
-            if isinstance(v, str):
-                out[u] = {"hash": v, "display": u.title(), "role": "user"}
-            else:
-                out[u] = {
-                    "hash":    v.get("hash", ""),
-                    "display": v.get("display", u.title()),
-                    "role":    v.get("role", "user"),
-                }
-        if out:
-            return out
-    except Exception:
-        pass
-
-    # 2 — Local JSON file
-    if USERS_FILE.exists():
-        try:
-            return json.loads(USERS_FILE.read_text())
-        except Exception:
-            pass
-
-    # 3 — In-memory (seeded with default admin on first run)
-    if "_users_mem" not in st.session_state:
-        st.session_state["_users_mem"] = {
-            "admin": {
-                "hash":    hash_pw("admin123"),
-                "display": "Administrator",
-                "role":    "admin",
-            }
-        }
-    return st.session_state["_users_mem"]
-
-def _save_users(users: dict):
-    """Persist to file if possible; otherwise keep in memory."""
-    st.session_state["_users_mem"] = users
-    try:
-        USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        USERS_FILE.write_text(json.dumps(users, indent=2))
-    except Exception:
-        pass  # read-only filesystem (Streamlit Cloud) — memory only
-
-def check_credentials(username: str, password: str) -> bool:
-    users = _load_users()
-    u = username.strip().lower()
-    if u not in users:
-        return False
-    return users[u]["hash"] == hash_pw(password)
-
-def get_user(username: str) -> dict:
-    users = _load_users()
-    return users.get(username.strip().lower(),
-                     {"display": username.title(), "role": "user"})
-
-# ── Login screen ──────────────────────────────────────────────────────────────
-def render_login():
-    components.html("""<style>
-    html,body,[data-testid="stAppViewContainer"],[data-testid="stMain"],
-    [data-testid="stMainBlockContainer"],.block-container{
-      background-color:#F5F2ED!important;}
-    </style>""", height=0)
-
-    st.markdown("""
-    <div style="text-align:center;padding:70px 0 36px 0;">
-      <div style="font-family:'Cormorant Garamond',serif;font-size:2.8rem;font-weight:400;
-                  color:#1A1A1A;letter-spacing:.02em;line-height:1.2;">✦ Export Ops</div>
-      <div style="font-family:'Jost',sans-serif;font-size:.65rem;letter-spacing:.22em;
-                  text-transform:uppercase;color:#7A7A7A;margin-top:6px;">Management Suite</div>
-    </div>""", unsafe_allow_html=True)
-
-    _, card, _ = st.columns([1, 3, 1])
-    with card:
-        st.markdown("""
-        <div style="background:#FFFFFF;border:1px solid #DDD8D0;border-top:3px solid #8C3D3D;
-                    padding:36px 32px 8px 32px;margin-bottom:0;">
-          <div style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;
-                      font-weight:500;color:#1A1A1A;margin-bottom:4px;">Sign in</div>
-          <div style="font-family:'Jost',sans-serif;font-size:.78rem;color:#7A7A7A;
-                      margin-bottom:20px;">Enter your credentials to continue</div>
-        </div>""", unsafe_allow_html=True)
-
-        with st.container():
-            st.markdown('<div style="background:#FFFFFF;border:1px solid #DDD8D0;border-top:none;padding:0 32px 28px 32px;">', unsafe_allow_html=True)
-            username = st.text_input("Username", placeholder="username", key="login_user")
-            password = st.text_input("Password", placeholder="••••••••", type="password", key="login_pw")
-
-            if st.session_state.get("login_failed"):
-                st.markdown("""
-                <div style="font-family:'Jost',sans-serif;font-size:.78rem;color:#8C3D3D;
-                            padding:10px 14px;background:#FFF5F5;border-left:3px solid #8C3D3D;
-                            margin-bottom:12px;">
-                  Incorrect username or password.
-                </div>""", unsafe_allow_html=True)
-
-            if st.button("Sign In  →", use_container_width=True, key="login_btn"):
-                if check_credentials(username, password):
-                    st.session_state.update({
-                        "authenticated": True,
-                        "username":      username.strip().lower(),
-                        "login_failed":  False,
-                    })
-                    st.rerun()
-                else:
-                    st.session_state["login_failed"] = True
-                    st.rerun()
-
-            st.markdown("""
-            <div style="font-family:'Jost',sans-serif;font-size:.70rem;color:#9A9A9A;
-                        text-align:center;margin-top:18px;line-height:1.7;">
-              Access restricted to authorised personnel.
-            </div>""", unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-# ── Admin panel ───────────────────────────────────────────────────────────────
-def render_admin():
-    page_header("User Management", "Add · Edit · Remove Users")
-    users = _load_users()
-
-    # ── Current users table ───────────────────────────────────────────────────
-    section_label("Current Users", "#8C3D3D")
-    rows = [{"Username": u,
-             "Display Name": v["display"],
-             "Role": v["role"]}
-            for u, v in users.items()]
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    divider()
-
-    # ── Add / edit user ───────────────────────────────────────────────────────
-    section_label("Add or Update User", "#2D4A3E")
-    col1, col2, col3, col4 = st.columns(4)
-    new_user    = col1.text_input("Username",     key="adm_user",    placeholder="e.g. maria")
-    new_display = col2.text_input("Display Name", key="adm_display", placeholder="e.g. María García")
-    new_pw      = col3.text_input("Password",     key="adm_pw",      type="password", placeholder="New password")
-    new_role    = col4.selectbox("Role",          ["user", "admin"],  key="adm_role")
-
-    if st.button("Save User", key="adm_save"):
-        u = new_user.strip().lower()
-        if not u:
-            st.warning("Username cannot be empty.")
-        elif not new_pw and u not in users:
-            st.warning("Password required for new users.")
-        else:
-            users[u] = {
-                "hash":    hash_pw(new_pw) if new_pw else users.get(u, {}).get("hash", ""),
-                "display": new_display.strip() or u.title(),
-                "role":    new_role,
-            }
-            _save_users(users)
-            st.success(f"User **{u}** saved.")
-            st.rerun()
-
-    divider()
-
-    # ── Delete user ───────────────────────────────────────────────────────────
-    section_label("Remove User", "#B8924A")
-    del_user = st.selectbox("Select user to remove",
-                            [u for u in users if u != st.session_state.get("username")],
-                            key="adm_del")
-    if st.button("Remove User", key="adm_del_btn"):
-        if del_user in users:
-            del users[del_user]
-            _save_users(users)
-            st.success(f"User **{del_user}** removed.")
-            st.rerun()
-
-    divider()
-
-    # ── Change own password ───────────────────────────────────────────────────
-    section_label("Change My Password", "#4A6080")
-    cp1, cp2 = st.columns(2)
-    cur_pw  = cp1.text_input("Current password", type="password", key="cp_cur")
-    new_pw2 = cp2.text_input("New password",     type="password", key="cp_new")
-    if st.button("Update Password", key="cp_btn"):
-        me = st.session_state.get("username", "")
-        if not check_credentials(me, cur_pw):
-            st.error("Current password is incorrect.")
-        elif len(new_pw2) < 6:
-            st.warning("New password must be at least 6 characters.")
-        else:
-            users[me]["hash"] = hash_pw(new_pw2)
-            _save_users(users)
-            st.success("Password updated successfully.")
-
-# ── Auth gate ─────────────────────────────────────────────────────────────────
-if not st.session_state.get("authenticated", False):
-    render_login()
-    st.stop()
-
 
 # ── Force light theme via config ─────────────────────────────────────────────
 # Inject into .streamlit/config.toml equivalent via query params trick
@@ -1276,233 +1061,21 @@ def render_logistics(df_all):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# AUTH — uses secrets.toml on Streamlit Cloud, plain comparison elsewhere
-# ════════════════════════════════════════════════════════════════════════════
-USERS_FILE = pathlib.Path(".streamlit/users.json")
-
-# ── Hardcoded users dict — always works, no hashing at startup ───────────────
-# Passwords stored as plain text here ONLY as a bootstrap fallback.
-# Once you set secrets.toml these are ignored.
-_BUILTIN_USERS = {
-    "admin":      {"password": "admin123",   "display": "Administrator", "role": "admin"},
-    "logistics":  {"password": "log2024",    "display": "Logistics",     "role": "user"},
-    "commercial": {"password": "com2024",    "display": "Commercial",    "role": "user"},
-}
-
-def _get_users() -> dict:
-    """
-    Returns dict of {username: {password, display, role}}.
-    Passwords are plain text — compared directly, no hashing required.
-    Priority: secrets.toml → users.json → _BUILTIN_USERS
-    """
-    # 1 ── Streamlit secrets (Streamlit Cloud)
-    try:
-        raw = st.secrets.get("users", {})
-        if raw:
-            out = {}
-            for u, v in raw.items():
-                u = str(u).strip().lower()
-                if isinstance(v, str):
-                    out[u] = {"password": v, "display": u.title(), "role": "user"}
-                else:
-                    out[u] = {
-                        "password": str(v.get("password", "")),
-                        "display":  str(v.get("display",  u.title())),
-                        "role":     str(v.get("role",     "user")),
-                    }
-            if out:
-                return out
-    except Exception:
-        pass
-
-    # 2 ── Local JSON file (self-hosted / local dev)
-    if USERS_FILE.exists():
-        try:
-            data = json.loads(USERS_FILE.read_text())
-            if data:
-                return data
-        except Exception:
-            pass
-
-    # 3 ── Built-in fallback (always works)
-    return dict(_BUILTIN_USERS)
-
-def _save_users(users: dict):
-    try:
-        USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        USERS_FILE.write_text(json.dumps(users, indent=2))
-    except Exception:
-        pass  # read-only on Streamlit Cloud — that's fine, secrets.toml is used there
-
-def check_credentials(username: str, password: str) -> bool:
-    if not username or not password:
-        return False
-    users = _get_users()
-    u = username.strip().lower()
-    if u not in users:
-        return False
-    stored = users[u].get("password", "")
-    return stored == password.strip()
-
-def get_user(username: str) -> dict:
-    users = _get_users()
-    return users.get(username.strip().lower(),
-                     {"display": username.title(), "role": "user"})
-
-# ── Login screen ──────────────────────────────────────────────────────────────
-def render_login():
-    components.html("""<style>
-    html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],
-    [data-testid="stMain"],[data-testid="stMainBlockContainer"],
-    .main,.block-container{background-color:#F5F2ED!important;}
-    </style>""", height=0)
-
-    st.markdown("""
-    <div style="text-align:center;padding:60px 0 32px 0;">
-      <div style="font-family:'Cormorant Garamond',serif;font-size:2.8rem;font-weight:400;
-                  color:#1A1A1A;letter-spacing:.02em;">✦ Export Ops</div>
-      <div style="font-family:'Jost',sans-serif;font-size:.65rem;letter-spacing:.22em;
-                  text-transform:uppercase;color:#7A7A7A;margin-top:8px;">Management Suite</div>
-    </div>""", unsafe_allow_html=True)
-
-    _, mid, _ = st.columns([1, 2, 1])
-    with mid:
-        st.markdown("""
-        <div style="background:#FFFFFF;border:1px solid #DDD8D0;border-top:3px solid #8C3D3D;
-                    padding:32px 32px 24px 32px;">
-          <div style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:500;
-                      color:#1A1A1A;">Sign in</div>
-          <div style="font-family:'Jost',sans-serif;font-size:.78rem;color:#7A7A7A;
-                      margin-top:4px;margin-bottom:20px;">
-            Enter your credentials to continue
-          </div>
-        </div>""", unsafe_allow_html=True)
-
-        with st.form("login_form"):
-            username = st.text_input("Username", placeholder="username")
-            password = st.text_input("Password", placeholder="••••••••", type="password")
-            submitted = st.form_submit_button("Sign In →", use_container_width=True)
-
-        if submitted:
-            if check_credentials(username, password):
-                st.session_state["authenticated"] = True
-                st.session_state["username"]      = username.strip().lower()
-                st.session_state["login_failed"]  = False
-                st.rerun()
-            else:
-                st.session_state["login_failed"] = True
-
-        if st.session_state.get("login_failed"):
-            st.markdown("""
-            <div style="background:#FFF5F5;border-left:3px solid #8C3D3D;padding:10px 14px;
-                        font-family:'Jost',sans-serif;font-size:.78rem;color:#8C3D3D;
-                        margin-top:8px;">
-              Incorrect username or password.
-            </div>""", unsafe_allow_html=True)
-
-        st.markdown("""
-        <div style="font-family:'Jost',sans-serif;font-size:.70rem;color:#9A9A9A;
-                    text-align:center;margin-top:16px;padding-bottom:8px;">
-          Access restricted to authorised personnel.
-        </div>""", unsafe_allow_html=True)
-
-# ── Admin panel ───────────────────────────────────────────────────────────────
-def render_admin():
-    page_header("User Management", "Add · Edit · Remove Users")
-    users = _get_users()
-
-    section_label("Current Users", "#8C3D3D")
-    rows = [{"Username": u, "Display Name": v["display"], "Role": v["role"]}
-            for u, v in users.items()]
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    divider()
-
-    section_label("Add or Update User", "#2D4A3E")
-    c1, c2, c3, c4 = st.columns(4)
-    new_user    = c1.text_input("Username",     key="adm_user",    placeholder="e.g. maria")
-    new_display = c2.text_input("Display Name", key="adm_display", placeholder="e.g. María")
-    new_pw      = c3.text_input("Password",     key="adm_pw",      type="password", placeholder="Password")
-    new_role    = c4.selectbox("Role",          ["user", "admin"],  key="adm_role")
-    if st.button("Save User", key="adm_save"):
-        u = new_user.strip().lower()
-        if not u:
-            st.warning("Username cannot be empty.")
-        elif not new_pw and u not in users:
-            st.warning("Password required for new users.")
-        else:
-            users[u] = {
-                "password": new_pw if new_pw else users.get(u, {}).get("password", ""),
-                "display":  new_display.strip() or u.title(),
-                "role":     new_role,
-            }
-            _save_users(users)
-            st.success(f"User **{u}** saved.")
-            st.rerun()
-    divider()
-
-    section_label("Remove User", "#B8924A")
-    removable = [u for u in users if u != st.session_state.get("username")]
-    if removable:
-        del_user = st.selectbox("Select user to remove", removable, key="adm_del")
-        if st.button("Remove User", key="adm_del_btn"):
-            del users[del_user]
-            _save_users(users)
-            st.success(f"User **{del_user}** removed.")
-            st.rerun()
-    else:
-        st.info("No other users to remove.")
-    divider()
-
-    section_label("Change My Password", "#4A6080")
-    cp1, cp2 = st.columns(2)
-    cur_pw  = cp1.text_input("Current password", type="password", key="cp_cur")
-    new_pw2 = cp2.text_input("New password",     type="password", key="cp_new")
-    if st.button("Update Password", key="cp_btn"):
-        me = st.session_state.get("username", "")
-        if not check_credentials(me, cur_pw):
-            st.error("Current password is incorrect.")
-        elif len(new_pw2) < 6:
-            st.warning("Password must be at least 6 characters.")
-        else:
-            users[me]["password"] = new_pw2
-            _save_users(users)
-            st.success("Password updated.")
-
-# ── Auth gate ─────────────────────────────────────────────────────────────────
-if not st.session_state.get("authenticated", False):
-    render_login()
-    st.stop()
-
-# ════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    current_user = get_user(st.session_state.get("username", ""))
-    display_name = current_user["display"]
-    is_admin     = current_user["role"] == "admin"
-
-    st.markdown(f"""
+    st.markdown("""
     <div style="padding:32px 0 6px 0;">
       <div style="font-family:'Cormorant Garamond',serif;font-size:1.55rem;font-weight:400;
                   color:#F5EDE8;letter-spacing:.04em;line-height:1.2;">✦ Export Ops</div>
       <div style="font-family:Jost,sans-serif;font-size:.62rem;letter-spacing:.2em;
                   text-transform:uppercase;color:#C4A090;margin-top:4px;">Management Suite</div>
     </div>
-    <div style="border-top:1px solid rgba(212,176,168,.25);margin:14px 0 10px 0;"></div>
-    <div style="font-family:Jost,sans-serif;font-size:.74rem;color:#D4B8B0;padding-bottom:14px;">
-      <span style="color:#C4A090;font-size:.60rem;letter-spacing:.12em;text-transform:uppercase;">Signed in as</span><br>
-      <span style="color:#F5EDE8;font-weight:500;">{display_name}</span>
-    </div>
-    <div style="border-top:1px solid rgba(212,176,168,.25);margin:0 0 16px 0;"></div>
+    <div style="border-top:1px solid rgba(212,176,168,.25);margin:16px 0 20px 0;"></div>
     """, unsafe_allow_html=True)
 
     st.markdown('<p style="font-family:Jost,sans-serif;font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;color:#C4A090;margin-bottom:8px;">Navigation</p>', unsafe_allow_html=True)
-
-    nav_options = ["📦  Logistics", "📈  Commercial Intelligence"]
-    if is_admin:
-        nav_options.append("👤  User Management")
-
-    page = st.radio("page_nav", nav_options,
+    page = st.radio("page_nav", ["📦  Logistics", "📈  Commercial Intelligence"],
                     label_visibility="collapsed", key="page_selector")
 
     st.markdown('<div style="border-top:1px solid rgba(212,176,168,.25);margin:20px 0;"></div>', unsafe_allow_html=True)
@@ -1529,14 +1102,6 @@ with st.sidebar:
             customers = st.multiselect("Customer", sorted(st.session_state.df["customer_name"].dropna().unique()),       placeholder="All customers", key="log_customers")
             st.session_state.origins   = origins
             st.session_state.customers = customers
-
-    # Sign out
-    st.sidebar.markdown('<div style="border-top:1px solid rgba(212,176,168,.25);margin:24px 0 12px 0;"></div>', unsafe_allow_html=True)
-    if st.sidebar.button("Sign Out", key="signout_btn"):
-        for k in ["authenticated","username","login_failed","df","filename",
-                  "loaded_at","origins","customers"]:
-            st.session_state.pop(k, None)
-        st.rerun()
 
 
 # ── File processing ───────────────────────────────────────────────────────────
@@ -1607,15 +1172,10 @@ if "df" not in st.session_state or st.session_state.df is None:
 
 # ── Routing ───────────────────────────────────────────────────────────────────
 if page == "📈  Commercial Intelligence":
-    render_commercial(st.session_state.df.copy() if "df" in st.session_state and st.session_state.df is not None else pd.DataFrame())
-elif page == "👤  User Management":
-    if is_admin:
-        render_admin()
-    else:
-        st.error("Access denied.")
+    render_commercial(st.session_state.df.copy())
 else:
     df_log = apply_filters(
-        st.session_state.df.copy() if "df" in st.session_state and st.session_state.df is not None else pd.DataFrame(),
+        st.session_state.df.copy(),
         st.session_state.get("origins", []),
         st.session_state.get("customers", [])
     )
