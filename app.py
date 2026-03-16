@@ -12,39 +12,55 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── CSS: Rosaprima-inspired ───────────────────────────────────────────────────
+# ── Force light theme via config ─────────────────────────────────────────────
+# Inject into .streamlit/config.toml equivalent via query params trick
+components.html("""
+<script>
+// Force the page body and all Streamlit wrappers to light background
+const style = document.createElement('style');
+style.textContent = `
+  body, #root, .main, .block-container,
+  [data-testid="stAppViewContainer"],
+  [data-testid="stAppViewBlockContainer"],
+  [data-testid="stMain"],
+  [data-testid="stMainBlockContainer"] {
+    background-color: #F5F2ED !important;
+    color: #1A1A1A !important;
+  }
+`;
+document.head.appendChild(style);
+</script>
+""", height=0)
+
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap');
 
-:root {
-  --bg:       #F5F2ED;
-  --white:    #FFFFFF;
-  --blush:    #F0EAE2;
-  --rose:     #8C3D3D;
-  --rose-dk:  #5C1F1F;
-  --rose-lt:  #C47A7A;
-  --forest:   #2D4A3E;
-  --gold:     #B8924A;
-  --gold-lt:  #D4B070;
-  --ink:      #1A1A1A;
-  --mid:      #4A4A4A;
-  --muted:    #7A7A7A;
-  --border:   #DDD8D0;
-  --border-lt:#EDE9E3;
-}
-
-/* ── Base ── */
-html, body, [class*="css"] {
+/* ── Force light mode on every Streamlit container ── */
+html,
+body,
+.main,
+.block-container,
+[data-testid="stApp"],
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewBlockContainer"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
+[data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"],
+[class*="css"],
+.element-container,
+div[data-stale="false"] {
+  background-color: #F5F2ED !important;
+  color: #1A1A1A !important;
   font-family: 'Jost', sans-serif !important;
-  background-color: var(--bg) !important;
-  color: var(--ink) !important;
 }
 
 /* ── Sidebar ── */
-section[data-testid="stSidebar"] {
-  background-color: var(--rose-dk) !important;
-  border-right: none !important;
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] > div,
+section[data-testid="stSidebar"] > div > div {
+  background-color: #5C1F1F !important;
 }
 section[data-testid="stSidebar"] * {
   color: #F5EDE8 !important;
@@ -58,9 +74,9 @@ section[data-testid="stSidebar"] .stSelectbox label {
   text-transform: uppercase !important;
 }
 section[data-testid="stSidebar"] [data-testid="stFileUploader"] {
-  border: 1px dashed rgba(212,176,168,.5) !important;
+  border: 1px dashed rgba(212,176,168,.45) !important;
   border-radius: 0 !important;
-  background: rgba(255,255,255,.04) !important;
+  background: rgba(255,255,255,.05) !important;
 }
 section[data-testid="stSidebar"] [data-testid="stFileUploader"] * {
   color: #D4B8B0 !important;
@@ -69,28 +85,32 @@ section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p 
   color: #F5EDE8 !important;
   font-size: .84rem !important;
 }
+section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+section[data-testid="stSidebar"] [data-baseweb="popover"] {
+  background-color: #3D1010 !important;
+  border-color: rgba(212,176,168,.3) !important;
+}
 
 /* ── Metrics ── */
 [data-testid="metric-container"] {
-  background: var(--white) !important;
-  border: 1px solid var(--border) !important;
-  border-top: 3px solid var(--rose) !important;
+  background: #FFFFFF !important;
+  border: 1px solid #DDD8D0 !important;
+  border-top: 3px solid #8C3D3D !important;
   border-radius: 0 !important;
   padding: 20px 24px !important;
-  box-shadow: 0 2px 12px rgba(26,26,26,.04) !important;
 }
 [data-testid="metric-container"] label {
   font-family: 'Jost', sans-serif !important;
   font-size: .65rem !important;
   letter-spacing: .18em !important;
   text-transform: uppercase !important;
-  color: var(--muted) !important;
+  color: #7A7A7A !important;
 }
 [data-testid="metric-container"] [data-testid="stMetricValue"] {
   font-family: 'Cormorant Garamond', serif !important;
   font-size: 2.2rem !important;
   font-weight: 500 !important;
-  color: var(--ink) !important;
+  color: #1A1A1A !important;
   line-height: 1.15 !important;
 }
 [data-testid="metric-container"] [data-testid="stMetricDelta"] svg { display: none !important; }
@@ -98,17 +118,22 @@ section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p 
   font-family: 'Jost', sans-serif !important;
   font-size: .78rem !important;
   font-weight: 500 !important;
+  color: #1A1A1A !important;
 }
 
 /* ── Dataframe ── */
 [data-testid="stDataFrame"] {
-  border: 1px solid var(--border) !important;
+  border: 1px solid #DDD8D0 !important;
   border-radius: 0 !important;
+}
+[data-testid="stDataFrame"] * {
+  color: #1A1A1A !important;
+  background-color: #FFFFFF !important;
 }
 
 /* ── Buttons ── */
 .stButton > button {
-  background-color: var(--rose) !important;
+  background-color: #8C3D3D !important;
   color: #FFF5F0 !important;
   border: none !important;
   font-family: 'Jost', sans-serif !important;
@@ -117,15 +142,14 @@ section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p 
   text-transform: uppercase !important;
   border-radius: 0 !important;
   padding: 10px 28px !important;
-  transition: background .2s !important;
 }
-.stButton > button:hover { background-color: var(--rose-dk) !important; }
+.stButton > button:hover { background-color: #5C1F1F !important; }
 
 /* ── Download button ── */
 [data-testid="stDownloadButton"] button {
-  background-color: transparent !important;
-  color: var(--rose) !important;
-  border: 1px solid var(--rose) !important;
+  background-color: #FFFFFF !important;
+  color: #8C3D3D !important;
+  border: 1px solid #8C3D3D !important;
   font-family: 'Jost', sans-serif !important;
   font-size: .70rem !important;
   letter-spacing: .14em !important;
@@ -134,14 +158,14 @@ section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p 
   padding: 8px 22px !important;
 }
 [data-testid="stDownloadButton"] button:hover {
-  background-color: var(--rose) !important;
-  color: white !important;
+  background-color: #8C3D3D !important;
+  color: #FFFFFF !important;
 }
 
 /* ── Tabs ── */
 .stTabs [data-baseweb="tab-list"] {
-  background: transparent !important;
-  border-bottom: 1px solid var(--border) !important;
+  background: #F5F2ED !important;
+  border-bottom: 1px solid #DDD8D0 !important;
   gap: 0 !important;
 }
 .stTabs [data-baseweb="tab"] {
@@ -149,45 +173,88 @@ section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p 
   font-size: .68rem !important;
   letter-spacing: .13em !important;
   text-transform: uppercase !important;
-  color: var(--muted) !important;
+  color: #7A7A7A !important;
   padding: 12px 22px !important;
   border-bottom: 2px solid transparent !important;
   background: transparent !important;
 }
 .stTabs [aria-selected="true"] {
-  color: var(--rose) !important;
-  border-bottom: 2px solid var(--rose) !important;
+  color: #8C3D3D !important;
+  border-bottom: 2px solid #8C3D3D !important;
   font-weight: 500 !important;
+  background: transparent !important;
+}
+.stTabs [data-baseweb="tab-panel"] {
+  background-color: #F5F2ED !important;
+  padding-top: 20px !important;
 }
 
 /* ── Expander ── */
-details {
-  border: 1px solid var(--border) !important;
+details,
+[data-testid="stExpander"] {
+  border: 1px solid #DDD8D0 !important;
   border-radius: 0 !important;
   margin-bottom: 6px !important;
-  background: var(--white) !important;
+  background: #FFFFFF !important;
 }
+[data-testid="stExpander"] summary,
 details summary {
   font-family: 'Jost', sans-serif !important;
   font-size: .78rem !important;
   letter-spacing: .06em !important;
-  color: var(--ink) !important;
+  color: #1A1A1A !important;
+  background: #FFFFFF !important;
   padding: 12px 16px !important;
 }
-details[open] summary { color: var(--rose) !important; }
+[data-testid="stExpander"][open] summary,
+details[open] summary { color: #8C3D3D !important; }
+[data-testid="stExpander"] > div > div {
+  background: #FFFFFF !important;
+  padding: 0 16px 12px !important;
+}
 
 /* ── Multiselect ── */
 .stMultiSelect [data-baseweb="tag"] {
-  background-color: var(--blush) !important;
-  color: var(--rose-dk) !important;
+  background-color: #F0EAE2 !important;
+  color: #5C1F1F !important;
   border-radius: 0 !important;
+}
+[data-baseweb="select"] > div {
+  background-color: #FFFFFF !important;
+  border-color: #DDD8D0 !important;
+  color: #1A1A1A !important;
+}
+
+/* ── Input/select text ── */
+input, textarea, [data-baseweb="input"] * {
+  background-color: #FFFFFF !important;
+  color: #1A1A1A !important;
 }
 
 /* ── Radio ── */
-[data-testid="stRadio"] label { cursor: pointer !important; }
+[data-testid="stRadio"] > label {
+  color: #1A1A1A !important;
+}
+[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p {
+  color: #1A1A1A !important;
+}
 
-/* ── Info/warning boxes ── */
-.stAlert { border-radius: 0 !important; }
+/* ── Alerts ── */
+.stAlert {
+  border-radius: 0 !important;
+  background-color: #FFF8F5 !important;
+  color: #1A1A1A !important;
+}
+
+/* ── Headers & text ── */
+h1, h2, h3, h4, h5, h6, p, span, div, label {
+  color: #1A1A1A !important;
+}
+
+/* ── Plotly chart bg ── */
+.js-plotly-plot, .plotly, .plot-container {
+  background: transparent !important;
+}
 </style>
 """
 components.html(CSS, height=0)
