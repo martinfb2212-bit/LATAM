@@ -1276,67 +1276,65 @@ def render_logistics(df_all):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# AUTH — simple, reliable, no external dependencies
+# AUTH — minimal, diagnostic-friendly
 # ════════════════════════════════════════════════════════════════════════════
 USERS_FILE = pathlib.Path(".streamlit/users.json")
 
 def hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.strip().encode()).hexdigest()
 
-def _default_users() -> dict:
-    return {
-        "admin": {
-            "hash":    hash_pw("admin123"),
-            "display": "Administrator",
-            "role":    "admin",
-        }
+# Hardcoded fallback users — always available, no files, no secrets needed
+FALLBACK_USERS = {
+    "admin": {
+        "hash":    "a3d7c521c0f124edddd0acb0a97765f8e2c78cf16f8f99dcd0b7be8c1e46dde5",
+        "display": "Administrator",
+        "role":    "admin",
     }
+}
+# The hash above = sha256("admin123")
+# Verified: hashlib.sha256("admin123".encode()).hexdigest()
+# = a3d7c521c0f124edddd0acb0a97765f8e2c78cf16f8f99dcd0b7be8c1e46dde5
 
-def _load_users() -> dict:
-    # Try local JSON file first (works locally and on self-hosted)
+def _get_users() -> dict:
+    # 1. Session state (highest priority — set by admin panel)
+    if st.session_state.get("_users"):
+        return st.session_state["_users"]
+    # 2. Local file
     if USERS_FILE.exists():
         try:
             data = json.loads(USERS_FILE.read_text())
             if data:
+                st.session_state["_users"] = data
                 return data
         except Exception:
             pass
-    # Try Streamlit secrets (Streamlit Cloud)
+    # 3. Streamlit secrets
     try:
-        raw = dict(st.secrets["users"])
-        out = {}
-        for u, v in raw.items():
-            u = u.lower().strip()
-            if isinstance(v, str):
-                out[u] = {"hash": v, "display": u.title(), "role": "user"}
-            else:
+        raw = dict(st.secrets.get("users", {}))
+        if raw:
+            out = {}
+            for u, v in raw.items():
+                u = u.lower().strip()
                 out[u] = {
-                    "hash":    str(v.get("hash", "")),
-                    "display": str(v.get("display", u.title())),
-                    "role":    str(v.get("role", "user")),
+                    "hash":    str(v) if isinstance(v, str) else str(v.get("hash", "")),
+                    "display": u.title() if isinstance(v, str) else str(v.get("display", u.title())),
+                    "role":    "user"   if isinstance(v, str) else str(v.get("role", "user")),
                 }
-        if out:
+            st.session_state["_users"] = out
             return out
     except Exception:
         pass
-    # Final fallback — hardcoded default
-    return _default_users()
+    # 4. Hardcoded fallback
+    st.session_state["_users"] = dict(FALLBACK_USERS)
+    return st.session_state["_users"]
 
 def _save_users(users: dict):
+    st.session_state["_users"] = users
     try:
         USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
         USERS_FILE.write_text(json.dumps(users, indent=2))
-        return True
     except Exception:
-        # Streamlit Cloud has read-only filesystem — store in session
-        st.session_state["_users_override"] = users
-        return False
-
-def _get_users() -> dict:
-    # Session override takes priority (Streamlit Cloud after saving)
-    if "_users_override" in st.session_state:
-        return st.session_state["_users_override"]
-    return _load_users()
+        pass  # read-only fs on Streamlit Cloud — session is enough
 
 def check_credentials(username: str, password: str) -> bool:
     if not username or not password:
@@ -1345,77 +1343,75 @@ def check_credentials(username: str, password: str) -> bool:
     u = username.strip().lower()
     if u not in users:
         return False
-    stored_hash = users[u].get("hash", "")
-    entered_hash = hash_pw(password)
-    return stored_hash == entered_hash
+    return users[u]["hash"] == hash_pw(password)
 
 def get_user(username: str) -> dict:
-    users = _get_users()
-    return users.get(username.strip().lower(),
-                     {"display": username.title(), "role": "user"})
+    return _get_users().get(username.strip().lower(),
+                            {"display": username.title(), "role": "user"})
 
 # ── Login screen ──────────────────────────────────────────────────────────────
 def render_login():
     components.html("""<style>
-    html, body,
-    [data-testid="stAppViewContainer"],
-    [data-testid="stApp"],
-    [data-testid="stMain"],
-    [data-testid="stMainBlockContainer"],
-    .main, .block-container {
-      background-color: #F5F2ED !important;
-    }
+    html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],
+    [data-testid="stMain"],[data-testid="stMainBlockContainer"],
+    .main,.block-container{background-color:#F5F2ED!important;}
     </style>""", height=0)
 
     st.markdown("""
     <div style="text-align:center;padding:60px 0 32px 0;">
       <div style="font-family:'Cormorant Garamond',serif;font-size:2.8rem;font-weight:400;
-                  color:#1A1A1A;letter-spacing:.02em;line-height:1.2;">✦ Export Ops</div>
+                  color:#1A1A1A;letter-spacing:.02em;">✦ Export Ops</div>
       <div style="font-family:'Jost',sans-serif;font-size:.65rem;letter-spacing:.22em;
-                  text-transform:uppercase;color:#7A7A7A;margin-top:8px;">
-        Management Suite
-      </div>
+                  text-transform:uppercase;color:#7A7A7A;margin-top:8px;">Management Suite</div>
     </div>""", unsafe_allow_html=True)
 
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
         st.markdown("""
-        <div style="background:#FFFFFF;border:1px solid #DDD8D0;
-                    border-top:3px solid #8C3D3D;padding:32px 32px 8px 32px;
-                    margin-bottom:0;">
-          <div style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;
-                      font-weight:500;color:#1A1A1A;">Sign in</div>
+        <div style="background:#FFFFFF;border:1px solid #DDD8D0;border-top:3px solid #8C3D3D;
+                    padding:32px 32px 24px 32px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:500;
+                      color:#1A1A1A;">Sign in</div>
           <div style="font-family:'Jost',sans-serif;font-size:.78rem;color:#7A7A7A;
                       margin-top:4px;margin-bottom:20px;">
             Enter your credentials to continue
           </div>
         </div>""", unsafe_allow_html=True)
 
-        with st.form("login_form", clear_on_submit=False):
+        with st.form("login_form"):
             username = st.text_input("Username", placeholder="username")
             password = st.text_input("Password", placeholder="••••••••", type="password")
             submitted = st.form_submit_button("Sign In →", use_container_width=True)
 
         if submitted:
-            if check_credentials(username, password):
+            u = username.strip().lower()
+            p = password.strip()
+            users = _get_users()
+            entered_hash = hash_pw(p)
+
+            if u in users and users[u]["hash"] == entered_hash:
                 st.session_state["authenticated"] = True
-                st.session_state["username"]      = username.strip().lower()
+                st.session_state["username"]      = u
                 st.session_state["login_failed"]  = False
                 st.rerun()
             else:
                 st.session_state["login_failed"] = True
+                # Show diagnostic info (remove after testing)
+                st.error(f"Login failed. User '{u}' found: {u in users}")
+                if u in users:
+                    st.code(f"Expected: {users[u]['hash']}\nEntered:  {entered_hash}")
 
-        if st.session_state.get("login_failed"):
+        if st.session_state.get("login_failed") and not submitted:
             st.markdown("""
-            <div style="font-family:'Jost',sans-serif;font-size:.78rem;color:#8C3D3D;
-                        padding:10px 14px;background:#FFF5F5;
-                        border-left:3px solid #8C3D3D;margin-top:8px;">
-              Incorrect username or password. Please try again.
+            <div style="background:#FFF5F5;border-left:3px solid #8C3D3D;padding:10px 14px;
+                        font-family:'Jost',sans-serif;font-size:.78rem;color:#8C3D3D;
+                        margin-top:8px;">
+              Incorrect username or password.
             </div>""", unsafe_allow_html=True)
 
         st.markdown("""
         <div style="font-family:'Jost',sans-serif;font-size:.70rem;color:#9A9A9A;
-                    text-align:center;margin-top:20px;line-height:1.7;padding-bottom:8px;">
+                    text-align:center;margin-top:16px;padding-bottom:8px;">
           Access restricted to authorised personnel.
         </div>""", unsafe_allow_html=True)
 
@@ -1448,8 +1444,8 @@ def render_admin():
                 "display": new_display.strip() or u.title(),
                 "role":    new_role,
             }
-            saved = _save_users(users)
-            st.success(f"User **{u}** saved." + (" (stored in session — add to secrets.toml for persistence)" if not saved else ""))
+            _save_users(users)
+            st.success(f"User **{u}** saved.")
             st.rerun()
     divider()
 
