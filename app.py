@@ -323,6 +323,9 @@ REQUIRED_COLS = ["delivery_year","delivery_week","customer_name",
                  "supply_source_name","destination","total_quantity","total_price"]
 SHIPMENT_KEYS = ["customer_name","delivery_year","delivery_week","supply_source_name","iata_code"]
 
+# Countries excluded from all analysis (transit hubs / non-end-markets)
+EXCLUDED_COUNTRIES = {"Netherlands", "Kenya", "Canada"}
+
 # Plotly palette — all high-contrast on white background
 PALETTE = ["#8C3D3D","#2D4A3E","#B8924A","#4A6080","#6B4080","#2D6B5A","#80502D"]
 
@@ -479,9 +482,9 @@ def load_and_validate(uploaded):
     df["delivery_week"]  = pd.to_numeric(df["delivery_week"],  errors="coerce")
     df["total_quantity"] = pd.to_numeric(df["total_quantity"], errors="coerce").fillna(0)
     df["total_price"]    = pd.to_numeric(df["total_price"],    errors="coerce").fillna(0)
-    df["iata_code"]      = extract_iata(df["destination"])
-    df["country"]        = df["iata_code"].map(IATA_COUNTRY).fillna("Unknown")
-    df["shipment_id"]    = (
+    df["iata_code"] = extract_iata(df["destination"])
+    df["country"]   = df["iata_code"].map(IATA_COUNTRY).fillna("Unknown")
+    df["shipment_id"] = (
         df["customer_name"].astype(str) + "|" +
         df["delivery_year"].astype(str) + "-W" +
         df["delivery_week"].astype(str).str.zfill(2) + "|" +
@@ -524,7 +527,7 @@ def render_commercial(df):
 
     years_avail   = sorted(df["delivery_year"].dropna().astype(int).unique())
     all_customers = sorted(df["customer_name"].dropna().unique())
-    all_countries = sorted(df["country"].dropna().unique())
+    all_countries = sorted(c for c in df["country"].dropna().unique() if c not in EXCLUDED_COUNTRIES)
 
     page_header("Commercial Intelligence",
                 "Year-over-Year Performance  ·  Growth Analysis  ·  Market Focus")
@@ -568,6 +571,8 @@ def render_commercial(df):
     dff = df[df["delivery_year"].isin(sel_years)].copy()
     if sel_customers: dff = dff[dff["customer_name"].isin(sel_customers)]
     if sel_countries: dff = dff[dff["country"].isin(sel_countries)]
+    # Exclude transit/supply hubs — not end-customer markets
+    dff = dff[~dff["country"].isin(EXCLUDED_COUNTRIES)].copy()
     if use_ytd:       dff = dff[dff["delivery_week"] <= current_week]
 
     if dff.empty:
@@ -885,7 +890,7 @@ def render_logistics(df_all):
         f"ISO Week {cur_week}  ·  {today.strftime('%B %d, %Y')}  ·  Air Freight Operations"
     )
 
-    tab_labels = ["Overview"] + [v[1] for v in VIEWS]
+    tab_labels = ["Overview"] + [v[1] for v in VIEWS] + ["Future Shipments"]
     all_tabs   = st.tabs(tab_labels)
 
     # ── Overview ──────────────────────────────────────────────────────────────
@@ -937,7 +942,7 @@ def render_logistics(df_all):
                          use_container_width=True, hide_index=True)
 
     # ── Week tabs ─────────────────────────────────────────────────────────────
-    for tab,(delta,wt,vt,accent,msg),wdf in zip(all_tabs[1:],VIEWS,week_dfs):
+    for tab,(delta,wt,vt,accent,msg),wdf in zip(all_tabs[1:-1],VIEWS,week_dfs):
         with tab:
             vy,vw = add_weeks(cur_year,cur_week,delta)
             n_s   = n_shipments(wdf) if not wdf.empty else 0
@@ -959,6 +964,100 @@ def render_logistics(df_all):
             divider()
             section_label("Shipments by Destination", accent)
             render_by_destination(wdf, accent, dl_key=f"{delta}_{vw}_{vy}")
+
+    # ── Future Shipments tab ──────────────────────────────────────────────────
+    with all_tabs[-1]:
+        # Anything beyond week +3
+        cutoff_year, cutoff_week = add_weeks(cur_year, cur_week, 3)
+        # Build a comparable date scalar for comparison
+        import datetime as _dt
+        cutoff_date = _dt.date.fromisocalendar(cutoff_year, cutoff_week, 7)  # end of W+3
+
+        def row_date(r):
+            try:
+                return _dt.date.fromisocalendar(int(r["delivery_year"]), int(r["delivery_week"]), 1)
+            except Exception:
+                return _dt.date.min
+
+        future_df = df_all[df_all.apply(lambda r: row_date(r) > cutoff_date, axis=1)].copy()
+
+        section_label("Future Shipments  —  Beyond Week +3", "#6B4080")
+        st.markdown(
+            f'<div style="font-family:Jost,sans-serif;font-size:.68rem;letter-spacing:.16em;'
+            f'text-transform:uppercase;color:#7A7A7A;margin-bottom:14px;">'
+            f'All confirmed orders after {week_label(cutoff_year, cutoff_week)}</div>',
+            unsafe_allow_html=True)
+        info_strip(
+            "These are confirmed orders already in the system beyond the active logistics window. "
+            "Review with the commercial team to ensure documentation preparation starts on time.",
+            "#6B4080")
+
+        if future_df.empty:
+            st.info("No future shipments found beyond Week +3.")
+        else:
+            n_fut   = n_shipments(future_df)
+            n_weeks = future_df["delivery_week"].nunique()
+            c1,c2,c3,c4,c5 = st.columns(5)
+            c1.metric("Shipments",     f"{n_fut:,}")
+            c2.metric("Product Lines", f"{len(future_df):,}")
+            c3.metric("Total Units",   f"{safe_int(future_df['total_quantity'].sum()):,}")
+            c4.metric("FOB Value",     f"$ {safe_float(future_df['total_price'].sum()):,.0f}")
+            c5.metric("Weeks Ahead",   f"{n_weeks:,}")
+
+            divider()
+
+            # Group by country → week → customer → shipment
+            countries_fut = sorted(future_df["country"].unique())
+            for country in countries_fut:
+                cdf = future_df[future_df["country"]==country]
+                tot_fob = safe_float(cdf["total_price"].sum())
+                tot_shp = n_shipments(cdf)
+                country_strip(country, tot_shp, tot_fob, "#6B4080")
+
+                # Sort weeks ascending
+                weeks_in_country = sorted(cdf[["delivery_year","delivery_week"]].drop_duplicates().values.tolist())
+                for yw in weeks_in_country:
+                    wy, ww = int(yw[0]), int(yw[1])
+                    wdf_f = cdf[(cdf["delivery_year"]==wy) & (cdf["delivery_week"]==ww)]
+                    n_sw  = n_shipments(wdf_f)
+                    fob_w = safe_float(wdf_f["total_price"].sum())
+
+                    with st.expander(
+                        f"📅  {week_label(wy, ww)}   ·   {n_sw} shipment{'s' if n_sw!=1 else ''}  ·  $ {fob_w:,.0f} FOB",
+                        expanded=False
+                    ):
+                        # Per shipment inside this country+week
+                        for sid, sdf in wdf_f.groupby("shipment_id", sort=False):
+                            customer = sdf["customer_name"].iloc[0]
+                            origin   = sdf["supply_source_name"].iloc[0]
+                            airport  = sdf["iata_code"].iloc[0]
+                            shipment_row(
+                                f"{customer}  ✈ {airport}", origin,
+                                len(sdf),
+                                safe_int(sdf["total_quantity"].sum()),
+                                safe_float(sdf["total_price"].sum()),
+                                "#6B4080"
+                            )
+                            line_cols = [c for c in ["crop_name","variety_name","product",
+                                                     "total_quantity","total_price","order_type"]
+                                         if c in sdf.columns]
+                            ldf = sdf[line_cols].copy()
+                            ldf.columns = [c.replace("_"," ").title() for c in ldf.columns]
+                            if "Total Price"    in ldf.columns: ldf["Total Price"]    = ldf["Total Price"].apply(lambda x: f"$ {x:,.2f}")
+                            if "Total Quantity" in ldf.columns: ldf["Total Quantity"] = ldf["Total Quantity"].apply(lambda x: f"{int(x):,}")
+                            st.dataframe(ldf, use_container_width=True, hide_index=True)
+
+            divider()
+            # Full export
+            buf = io.BytesIO()
+            future_df.to_excel(buf, index=False, engine="openpyxl")
+            st.download_button(
+                "⬇  Export Future Shipments to Excel",
+                data=buf.getvalue(),
+                file_name="future_shipments.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_future"
+            )
 
 
 # ════════════════════════════════════════════════════════════════════════════
