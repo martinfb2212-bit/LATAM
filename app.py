@@ -5,32 +5,138 @@ from datetime import datetime, date
 import io
 import streamlit.components.v1 as components
 
-# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Logistics Dashboard · Export Operations",
+    page_title="Export Operations Suite",
     page_icon="✦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+# ── Global CSS ────────────────────────────────────────────────────────────────
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=Jost:wght@300;400;500;600&display=swap');
-:root{--ivory:#FAF7F2;--burgundy:#9C4A52;--sage:#8A9E85;--gold:#B8974A;--charcoal:#2C2825;--cream:#EDE8E0;--white:#FFFFFF;}
-html,body,[class*="css"]{font-family:'Jost',sans-serif!important;background-color:var(--ivory)!important;color:var(--charcoal)!important;}
-section[data-testid="stSidebar"]{background-color:var(--charcoal)!important;}
-section[data-testid="stSidebar"] *{color:var(--ivory)!important;}
-section[data-testid="stSidebar"] label{color:var(--cream)!important;font-family:'Jost',sans-serif!important;font-size:.78rem!important;letter-spacing:.08em!important;text-transform:uppercase!important;}
-[data-testid="metric-container"]{background:var(--white)!important;border:1px solid var(--cream)!important;border-left:3px solid var(--burgundy)!important;border-radius:6px!important;padding:16px 20px!important;}
-[data-testid="metric-container"] label{font-family:'Jost',sans-serif!important;font-size:.72rem!important;letter-spacing:.1em!important;text-transform:uppercase!important;color:var(--burgundy)!important;}
-[data-testid="metric-container"] [data-testid="stMetricValue"]{font-family:'Cormorant Garamond',serif!important;font-size:2rem!important;font-weight:600!important;color:var(--charcoal)!important;}
-[data-testid="stDataFrame"]{border:1px solid var(--cream)!important;border-radius:6px!important;}
-.stButton>button{background-color:var(--burgundy)!important;color:var(--ivory)!important;border:none!important;font-family:'Jost',sans-serif!important;letter-spacing:.08em!important;border-radius:4px!important;}
-.stButton>button:hover{background-color:var(--gold)!important;}
-.stTabs [data-baseweb="tab-list"]{background:var(--white)!important;border-bottom:2px solid var(--cream)!important;}
-.stTabs [data-baseweb="tab"]{font-family:'Jost',sans-serif!important;font-size:.75rem!important;letter-spacing:.07em!important;text-transform:uppercase!important;color:var(--charcoal)!important;}
-.stTabs [aria-selected="true"]{border-bottom:2px solid var(--burgundy)!important;color:var(--burgundy)!important;}
-[data-testid="stFileUploader"]{border:1px dashed var(--burgundy)!important;border-radius:6px!important;padding:8px!important;}
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Jost:wght@300;400;500;600&display=swap');
+
+:root {
+  --ivory:    #FAFAF8;
+  --white:    #FFFFFF;
+  --burgundy: #8B3A3A;
+  --burg-lt:  #C27070;
+  --sage:     #7A9E8E;
+  --gold:     #C4974A;
+  --gold-lt:  #E8C98A;
+  --charcoal: #1E1E1E;
+  --mid:      #5A5A5A;
+  --soft:     #9A9A9A;
+  --cream:    #F0EDE8;
+  --border:   #E8E4DC;
+}
+
+html, body, [class*="css"] {
+  font-family: 'Jost', sans-serif !important;
+  background-color: var(--ivory) !important;
+  color: var(--charcoal) !important;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+  background-color: var(--white) !important;
+  border-right: 1px solid var(--border) !important;
+}
+section[data-testid="stSidebar"] * { color: var(--charcoal) !important; }
+section[data-testid="stSidebar"] .stRadio label {
+  font-family: 'Jost', sans-serif !important;
+  font-size: .82rem !important;
+  letter-spacing: .06em !important;
+}
+
+/* Metrics */
+[data-testid="metric-container"] {
+  background: var(--white) !important;
+  border: 1px solid var(--border) !important;
+  border-top: 2px solid var(--burgundy) !important;
+  border-radius: 2px !important;
+  padding: 18px 22px !important;
+}
+[data-testid="metric-container"] label {
+  font-family: 'Jost', sans-serif !important;
+  font-size: .68rem !important;
+  letter-spacing: .14em !important;
+  text-transform: uppercase !important;
+  color: var(--soft) !important;
+}
+[data-testid="metric-container"] [data-testid="stMetricValue"] {
+  font-family: 'Cormorant Garamond', serif !important;
+  font-size: 2.1rem !important;
+  font-weight: 500 !important;
+  color: var(--charcoal) !important;
+}
+[data-testid="metric-container"] [data-testid="stMetricDelta"] {
+  font-size: .78rem !important;
+}
+
+/* Dataframe */
+[data-testid="stDataFrame"] {
+  border: 1px solid var(--border) !important;
+  border-radius: 2px !important;
+}
+
+/* Buttons */
+.stButton > button {
+  background-color: var(--charcoal) !important;
+  color: var(--white) !important;
+  border: none !important;
+  font-family: 'Jost', sans-serif !important;
+  font-size: .75rem !important;
+  letter-spacing: .12em !important;
+  text-transform: uppercase !important;
+  border-radius: 2px !important;
+  padding: 8px 22px !important;
+}
+.stButton > button:hover { background-color: var(--burgundy) !important; }
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+  background: transparent !important;
+  border-bottom: 1px solid var(--border) !important;
+  gap: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+  font-family: 'Jost', sans-serif !important;
+  font-size: .72rem !important;
+  letter-spacing: .1em !important;
+  text-transform: uppercase !important;
+  color: var(--soft) !important;
+  padding: 10px 20px !important;
+  border-bottom: 2px solid transparent !important;
+}
+.stTabs [aria-selected="true"] {
+  color: var(--burgundy) !important;
+  border-bottom: 2px solid var(--burgundy) !important;
+}
+
+/* File uploader */
+[data-testid="stFileUploader"] {
+  border: 1px solid var(--border) !important;
+  border-radius: 2px !important;
+}
+
+/* Expander */
+details summary {
+  font-family: 'Jost', sans-serif !important;
+  font-size: .78rem !important;
+  letter-spacing: .06em !important;
+}
+
+/* Radio */
+.stRadio [data-testid="stMarkdownContainer"] p {
+  font-size: .82rem !important;
+}
+
+/* Select */
+.stMultiSelect [data-baseweb="tag"] {
+  background-color: var(--cream) !important;
+}
 </style>
 """
 components.html(CSS, height=0)
@@ -41,37 +147,32 @@ IATA_COUNTRY = {
     "ATL":"United States","BOS":"United States","DFW":"United States","SFO":"United States",
     "EWR":"United States","IAD":"United States","SEA":"United States","PHL":"United States",
     "DTW":"United States","MSP":"United States","CLT":"United States","LGA":"United States",
-    "MDW":"United States","BWI":"United States","SLC":"United States","DEN":"United States",
-    "PDX":"United States","HOU":"United States","TPA":"United States","MCO":"United States",
-    "YYZ":"Canada","YVR":"Canada","YUL":"Canada","YYC":"Canada","YEG":"Canada","YOW":"Canada",
-    "MEX":"Mexico","GDL":"Mexico","MTY":"Mexico","CUN":"Mexico","TIJ":"Mexico",
+    "MDW":"United States","BWI":"United States","DEN":"United States","MCO":"United States",
+    "YYZ":"Canada","YVR":"Canada","YUL":"Canada","YYC":"Canada","YEG":"Canada",
+    "MEX":"Mexico","GDL":"Mexico","MTY":"Mexico","CUN":"Mexico",
     "PTY":"Panama","SJO":"Costa Rica","GUA":"Guatemala","SAL":"El Salvador",
-    "BZE":"Belize","MGA":"Nicaragua","TGU":"Honduras",
     "MBJ":"Jamaica","KIN":"Jamaica","NAS":"Bahamas","PUJ":"Dominican Republic",
     "SDQ":"Dominican Republic","SJU":"Puerto Rico","HAV":"Cuba",
-    "GRU":"Brazil","GIG":"Brazil","VCP":"Brazil","BSB":"Brazil","SSA":"Brazil","REC":"Brazil",
+    "GRU":"Brazil","GIG":"Brazil","VCP":"Brazil","BSB":"Brazil","SSA":"Brazil",
     "BOG":"Colombia","MDE":"Colombia","CTG":"Colombia","CLO":"Colombia","BAQ":"Colombia",
-    "UIO":"Ecuador","GYE":"Ecuador",
-    "LIM":"Peru","CUZ":"Peru","SCL":"Chile","PMC":"Chile",
-    "EZE":"Argentina","AEP":"Argentina","COR":"Argentina",
-    "MVD":"Uruguay","ASU":"Paraguay","LPB":"Bolivia","VVI":"Bolivia",
-    "CCS":"Venezuela","MAR":"Venezuela",
+    "UIO":"Ecuador","GYE":"Ecuador","LIM":"Peru","CUZ":"Peru",
+    "SCL":"Chile","EZE":"Argentina","AEP":"Argentina","MVD":"Uruguay","ASU":"Paraguay",
+    "LPB":"Bolivia","CCS":"Venezuela",
     "AMS":"Netherlands","EIN":"Netherlands",
-    "LHR":"United Kingdom","LGW":"United Kingdom","MAN":"United Kingdom","EDI":"United Kingdom",
-    "CDG":"France","ORY":"France","NCE":"France","LYS":"France",
-    "FRA":"Germany","MUC":"Germany","DUS":"Germany","HAM":"Germany","TXL":"Germany","BER":"Germany",
-    "MAD":"Spain","BCN":"Spain","VLC":"Spain","AGP":"Spain","PMI":"Spain",
-    "FCO":"Italy","MXP":"Italy","LIN":"Italy","NAP":"Italy","VCE":"Italy",
-    "ZRH":"Switzerland","GVA":"Switzerland","BSL":"Switzerland",
-    "VIE":"Austria","SZG":"Austria","BRU":"Belgium","LGG":"Belgium",
+    "LHR":"United Kingdom","LGW":"United Kingdom","MAN":"United Kingdom",
+    "CDG":"France","ORY":"France","NCE":"France",
+    "FRA":"Germany","MUC":"Germany","DUS":"Germany","HAM":"Germany","BER":"Germany",
+    "MAD":"Spain","BCN":"Spain","VLC":"Spain",
+    "FCO":"Italy","MXP":"Italy","VCE":"Italy",
+    "ZRH":"Switzerland","GVA":"Switzerland",
+    "VIE":"Austria","BRU":"Belgium",
     "CPH":"Denmark","ARN":"Sweden","OSL":"Norway","HEL":"Finland",
-    "LIS":"Portugal","OPO":"Portugal","ATH":"Greece","SKG":"Greece",
-    "WAW":"Poland","KRK":"Poland","PRG":"Czech Republic","BUD":"Hungary",
-    "ZAG":"Croatia","SOF":"Bulgaria","OTP":"Romania",
-    "IST":"Turkey","SAW":"Turkey","KBP":"Ukraine",
+    "LIS":"Portugal","ATH":"Greece","WAW":"Poland","PRG":"Czech Republic",
+    "BUD":"Hungary","ZAG":"Croatia","SOF":"Bulgaria","OTP":"Romania",
+    "IST":"Turkey","SAW":"Turkey",
     "DXB":"United Arab Emirates","AUH":"United Arab Emirates","SHJ":"United Arab Emirates",
-    "DOH":"Qatar","BAH":"Bahrain","KWI":"Kuwait","MCT":"Oman","AMM":"Jordan",
-    "TLV":"Israel","RUH":"Saudi Arabia","JED":"Saudi Arabia","DMM":"Saudi Arabia",
+    "DOH":"Qatar","BAH":"Bahrain","KWI":"Kuwait","MCT":"Oman",
+    "TLV":"Israel","RUH":"Saudi Arabia","JED":"Saudi Arabia",
     "CAI":"Egypt","NBO":"Kenya","JNB":"South Africa","CPT":"South Africa",
     "ADD":"Ethiopia","KGL":"Rwanda","LOS":"Nigeria","ACC":"Ghana","CMN":"Morocco",
     "HKG":"Hong Kong","SIN":"Singapore","KUL":"Malaysia",
@@ -79,16 +180,14 @@ IATA_COUNTRY = {
     "ICN":"South Korea","PEK":"China","PVG":"China","CAN":"China",
     "TPE":"Taiwan","BKK":"Thailand","CGK":"Indonesia","DPS":"Indonesia",
     "MNL":"Philippines","SGN":"Vietnam","HAN":"Vietnam",
-    "BOM":"India","DEL":"India","BLR":"India","MAA":"India",
-    "SYD":"Australia","MEL":"Australia","BNE":"Australia",
-    "AKL":"New Zealand",
+    "BOM":"India","DEL":"India","BLR":"India",
+    "SYD":"Australia","MEL":"Australia","BNE":"Australia","AKL":"New Zealand",
 }
-
 COUNTRY_FLAG = {
     "United States":"🇺🇸","Canada":"🇨🇦","Mexico":"🇲🇽","Brazil":"🇧🇷","Colombia":"🇨🇴",
     "Ecuador":"🇪🇨","Peru":"🇵🇪","Chile":"🇨🇱","Argentina":"🇦🇷","Uruguay":"🇺🇾",
     "Paraguay":"🇵🇾","Bolivia":"🇧🇴","Venezuela":"🇻🇪","Panama":"🇵🇦","Costa Rica":"🇨🇷",
-    "Guatemala":"🇬🇹","El Salvador":"🇸🇻","Honduras":"🇭🇳","Nicaragua":"🇳🇮","Belize":"🇧🇿",
+    "Guatemala":"🇬🇹","El Salvador":"🇸🇻","Honduras":"🇭🇳","Nicaragua":"🇳🇮",
     "Jamaica":"🇯🇲","Dominican Republic":"🇩🇴","Puerto Rico":"🇵🇷","Cuba":"🇨🇺","Bahamas":"🇧🇸",
     "Netherlands":"🇳🇱","United Kingdom":"🇬🇧","France":"🇫🇷","Germany":"🇩🇪","Spain":"🇪🇸",
     "Italy":"🇮🇹","Switzerland":"🇨🇭","Austria":"🇦🇹","Belgium":"🇧🇪","Denmark":"🇩🇰",
@@ -96,7 +195,7 @@ COUNTRY_FLAG = {
     "Poland":"🇵🇱","Czech Republic":"🇨🇿","Hungary":"🇭🇺","Romania":"🇷🇴","Bulgaria":"🇧🇬",
     "Croatia":"🇭🇷","Turkey":"🇹🇷","Ukraine":"🇺🇦",
     "United Arab Emirates":"🇦🇪","Qatar":"🇶🇦","Saudi Arabia":"🇸🇦","Kuwait":"🇰🇼",
-    "Bahrain":"🇧🇭","Oman":"🇴🇲","Jordan":"🇯🇴","Israel":"🇮🇱",
+    "Bahrain":"🇧🇭","Oman":"🇴🇲","Israel":"🇮🇱",
     "Egypt":"🇪🇬","Kenya":"🇰🇪","South Africa":"🇿🇦","Ethiopia":"🇪🇹","Nigeria":"🇳🇬",
     "Ghana":"🇬🇭","Morocco":"🇲🇦","Rwanda":"🇷🇼",
     "Japan":"🇯🇵","South Korea":"🇰🇷","China":"🇨🇳","Hong Kong":"🇭🇰","Taiwan":"🇹🇼",
@@ -104,55 +203,98 @@ COUNTRY_FLAG = {
     "Vietnam":"🇻🇳","India":"🇮🇳","Australia":"🇦🇺","New Zealand":"🇳🇿",
 }
 
-REQUIRED_COLS = [
-    "delivery_year","delivery_week","customer_name",
-    "supply_source_name","destination","total_quantity","total_price"
-]
+REQUIRED_COLS = ["delivery_year","delivery_week","customer_name",
+                 "supply_source_name","destination","total_quantity","total_price"]
 SHIPMENT_KEYS = ["customer_name","delivery_year","delivery_week","supply_source_name","iata_code"]
 
-# ── Utilities ─────────────────────────────────────────────────────────────────
-def flag(c): return COUNTRY_FLAG.get(c,"🌍")
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def flag(c): return COUNTRY_FLAG.get(c, "🌍")
 
-def ornament():
-    st.markdown('<div style="text-align:center;color:#B8974A;letter-spacing:.4em;margin:18px 0;font-size:.85rem;">✦ ─────── ✦ ─────── ✦</div>', unsafe_allow_html=True)
+def safe_int(v):
+    try:
+        f = float(v)
+        return 0 if (np.isnan(f) or np.isinf(f)) else int(f)
+    except Exception:
+        return 0
 
-def hero(title, subtitle, color="#9C4A52"):
+def safe_float(v):
+    try:
+        f = float(v)
+        return 0.0 if (np.isnan(f) or np.isinf(f)) else f
+    except Exception:
+        return 0.0
+
+def pct_change(cur, prev):
+    c, p = safe_float(cur), safe_float(prev)
+    if p == 0: return None
+    return (c - p) / p * 100
+
+def status_badge(chg, cur_fob):
+    cf = safe_float(cur_fob)
+    if chg is None:   return "🆕 New"
+    if cf == 0:       return "⛔ Lost"
+    if chg >= 15:     return "🚀 Strong growth"
+    if chg >= 3:      return "🟢 Growing"
+    if chg >= -5:     return "🟡 Stable"
+    if chg >= -20:    return "🔻 Declining"
+    return "🔴 At risk"
+
+def div():
+    st.markdown(
+        '<div style="border-top:1px solid #E8E4DC;margin:28px 0;"></div>',
+        unsafe_allow_html=True)
+
+def page_title(title, sub=""):
     st.markdown(f"""
-    <div style="background:linear-gradient(135deg,{color} 0%,#2C2825 100%);
-                border-radius:8px;padding:32px 36px;margin-bottom:24px;">
-      <div style="font-family:'Cormorant Garamond',serif;font-size:2.2rem;font-weight:600;color:#FAF7F2;letter-spacing:.04em;">{title}</div>
-      <div style="font-family:'Jost',sans-serif;font-size:.85rem;color:#EDE8E0;letter-spacing:.12em;text-transform:uppercase;margin-top:6px;">{subtitle}</div>
+    <div style="padding:32px 0 20px 0;border-bottom:1px solid #E8E4DC;margin-bottom:28px;">
+      <div style="font-family:\'Cormorant Garamond\',serif;font-size:2.6rem;font-weight:400;
+                  color:#1E1E1E;letter-spacing:.01em;line-height:1.2;">{title}</div>
+      {"<div style='font-family:Jost,sans-serif;font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:#9A9A9A;margin-top:8px;'>"+sub+"</div>" if sub else ""}
     </div>""", unsafe_allow_html=True)
 
-def section_hdr(label, accent="#9C4A52"):
+def section_title(t, accent="#8B3A3A"):
     st.markdown(f"""
-    <div style="background:#FFFFFF;border:1px solid #EDE8E0;border-left:3px solid {accent};
-                border-radius:6px;padding:12px 20px;margin:16px 0 6px 0;">
-      <span style="font-family:'Jost',sans-serif;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:{accent};">{label}</span>
+    <div style="display:flex;align-items:center;gap:12px;margin:24px 0 10px 0;">
+      <div style="width:3px;height:18px;background:{accent};border-radius:1px;flex-shrink:0;"></div>
+      <span style="font-family:\'Cormorant Garamond\',serif;font-size:1.25rem;font-weight:500;
+                   color:#1E1E1E;letter-spacing:.02em;">{t}</span>
     </div>""", unsafe_allow_html=True)
 
-def alert_card(msg, accent="#8A9E85"):
+def note_box(msg, color="#7A9E8E"):
     st.markdown(f"""
-    <div style="background:#FFFFFF;border:1px solid #EDE8E0;border-left:3px solid {accent};
-                border-radius:6px;padding:14px 20px;margin:8px 0 16px 0;
-                font-family:'Jost',sans-serif;font-size:.84rem;color:#2C2825;line-height:1.7;">{msg}</div>""",
+    <div style="background:#FAFAF8;border:1px solid #E8E4DC;border-left:3px solid {color};
+                padding:14px 20px;margin:10px 0 18px 0;font-family:Jost,sans-serif;
+                font-size:.83rem;color:#1E1E1E;line-height:1.75;">{msg}</div>""",
     unsafe_allow_html=True)
 
-def delta_chip(val, suffix=""):
-    if val is None or (isinstance(val, float) and np.isnan(val)):
-        return '<span style="color:#8A9E85;font-size:.75rem;">— no prior data</span>'
-    color = "#2d7a4f" if val >= 0 else "#9C4A52"
-    arrow = "▲" if val >= 0 else "▼"
-    return f'<span style="color:{color};font-size:.75rem;font-weight:500;">{arrow} {abs(val):.1f}%{suffix}</span>'
+def country_header(country, n_ship, fob, accent="#8B3A3A"):
+    fl = flag(country)
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;
+                background:#FFFFFF;border:1px solid #E8E4DC;border-left:3px solid {accent};
+                margin:16px 0 4px 0;">
+      <span style="font-size:1.25rem;">{fl}</span>
+      <span style="font-family:\'Cormorant Garamond\',serif;font-size:1.1rem;font-weight:500;
+                   color:{accent};">{country}</span>
+      <span style="font-family:Jost,sans-serif;font-size:.72rem;letter-spacing:.08em;
+                   text-transform:uppercase;color:#9A9A9A;margin-left:4px;">
+        {n_ship} shipment{"s" if n_ship!=1 else ""} &nbsp;·&nbsp; $ {fob:,.0f} FOB
+      </span>
+    </div>""", unsafe_allow_html=True)
 
-def kpi_row(shipments, products, qty, fob, destinations):
-    c1,c2,c3,c4,c5 = st.columns(5)
-    c1.metric("Shipments",    f"{shipments:,}")
-    c2.metric("Product Lines",f"{products:,}")
-    c3.metric("Total Units",  f"{int(qty):,}")
-    c4.metric("FOB Value",    f"$ {fob:,.0f}")
-    c5.metric("Destinations", f"{destinations:,}")
+def shipment_card(customer, origin, n_lines, units, fob, accent):
+    st.markdown(f"""
+    <div style="background:#FAFAF8;border:1px solid #E8E4DC;padding:10px 16px;
+                margin:6px 0 3px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+      <span style="font-family:\'Cormorant Garamond\',serif;font-size:1rem;font-weight:500;
+                   color:{accent};">📦 {customer}</span>
+      <span style="font-family:Jost,sans-serif;font-size:.74rem;color:#9A9A9A;">from {origin}</span>
+      <span style="font-family:Jost,sans-serif;font-size:.72rem;color:#5A5A5A;margin-left:auto;">
+        {n_lines} line{"s" if n_lines!=1 else ""} &nbsp;·&nbsp; {units:,} units &nbsp;·&nbsp; $ {fob:,.2f}
+      </span>
+    </div>""", unsafe_allow_html=True)
 
+# ── Data helpers ──────────────────────────────────────────────────────────────
 def extract_iata(series):
     s = series.astype(str).str.upper().str.strip()
     extracted = s.str.extract(r'\b([A-Z]{3})\b', expand=False)
@@ -206,12 +348,328 @@ def apply_filters(df, origins, customers):
     if customers: df = df[df["customer_name"].isin(customers)]
     return df
 
-def pct_change(curr, prev):
-    if prev and prev != 0:
-        return (curr - prev) / prev * 100
-    return None
+def n_shipments(df):
+    if df.empty: return 0
+    return df.groupby(SHIPMENT_KEYS)["shipment_id"].nunique().sum()
 
-# ── Render shipments by destination ──────────────────────────────────────────
+# ── Pivot helpers (safe) ──────────────────────────────────────────────────────
+def safe_pivot_val(pivot_df, key_col, key_val, year_col):
+    row = pivot_df[pivot_df[key_col] == key_val]
+    if row.empty or year_col not in row.columns:
+        return 0.0
+    return safe_float(row[year_col].values[0])
+
+# ════════════════════════════════════════════════════════════════════════════
+# COMMERCIAL INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+def render_commercial(df):
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    PALETTE = ["#8B3A3A","#7A9E8E","#C4974A","#4A6B8A","#6B4A8A","#4A8A6B","#8A6B4A"]
+
+    years_avail = sorted(df["delivery_year"].dropna().astype(int).unique())
+    all_customers = sorted(df["customer_name"].dropna().unique())
+    all_countries = sorted(df["country"].dropna().unique())
+
+    page_title("Commercial Intelligence", "Year-over-Year Performance & Growth Analysis")
+
+    # ── Scope toggle ─────────────────────────────────────────────────────────
+    today_iso    = date.today().isocalendar()
+    current_week = today_iso[1]
+    current_year = today_iso[0]
+
+    sc1, sc2 = st.columns([1, 2])
+    with sc1:
+        scope = st.radio("Comparison scope", [
+            "📅  Year-to-Date",
+            "📆  Full Year"
+        ], key="ci_scope")
+    with sc2:
+        use_ytd = "Year-to-Date" in scope
+        if use_ytd:
+            note_box(
+                f"Comparing <strong>Week 1 – Week {current_week}</strong> across all years. "
+                f"Prior years are capped at the same week for a fair comparison.",
+                "#7A9E8E")
+        else:
+            note_box(
+                "Comparing <strong>all weeks present in the system</strong> per year — "
+                "including future confirmed orders. Useful for full-year forecasting.",
+                "#C4974A")
+
+    div()
+
+    # ── Filters ───────────────────────────────────────────────────────────────
+    fc1, fc2, fc3 = st.columns(3)
+    sel_years     = fc1.multiselect("Years", years_avail, default=years_avail[-3:] if len(years_avail)>=3 else years_avail, key="ci_years")
+    sel_customers = fc2.multiselect("Customers", all_customers, default=[], key="ci_customers", placeholder="All customers")
+    sel_countries = fc3.multiselect("Destination countries", all_countries, default=[], key="ci_countries", placeholder="All countries")
+
+    if not sel_years:
+        st.warning("Select at least one year.")
+        return
+
+    dff = df[df["delivery_year"].isin(sel_years)].copy()
+    if sel_customers: dff = dff[dff["customer_name"].isin(sel_customers)]
+    if sel_countries: dff = dff[dff["country"].isin(sel_countries)]
+    if use_ytd:       dff = dff[dff["delivery_week"] <= current_week]
+
+    if dff.empty:
+        st.info("No data matches the selected filters.")
+        return
+
+    cur_year  = max(sel_years)
+    prev_year = cur_year - 1
+    prev2_year= cur_year - 2
+    cy, py, p2y = str(cur_year), str(prev_year), str(prev2_year)
+
+    scope_lbl = f"YTD W1–W{current_week}" if use_ytd else "Full Year"
+
+    cur_df  = dff[dff["delivery_year"]==cur_year]
+    prev_df = dff[dff["delivery_year"]==prev_year]  if prev_year  in dff["delivery_year"].values else pd.DataFrame()
+    prev2_df= dff[dff["delivery_year"]==prev2_year] if prev2_year in dff["delivery_year"].values else pd.DataFrame()
+
+    # ── Top-level KPIs ────────────────────────────────────────────────────────
+    div()
+    section_title(f"Summary · {scope_lbl} · {cur_year} vs {prev_year}")
+
+    cur_ship  = n_shipments(cur_df)
+    prev_ship = n_shipments(prev_df)
+    cur_fob   = safe_float(cur_df["total_price"].sum())
+    prev_fob  = safe_float(prev_df["total_price"].sum()) if not prev_df.empty else 0.0
+    cur_units = safe_float(cur_df["total_quantity"].sum())
+    prev_units= safe_float(prev_df["total_quantity"].sum()) if not prev_df.empty else 0.0
+
+    def pct_str(c, p):
+        ch = pct_change(c, p)
+        return f"{ch:+.1f}%" if ch is not None else None
+
+    k1,k2,k3,k4 = st.columns(4)
+    k1.metric("Shipments",       f"{cur_ship:,}",           delta=pct_str(cur_ship, prev_ship))
+    k2.metric("FOB Value",       f"$ {cur_fob:,.0f}",       delta=pct_str(cur_fob, prev_fob))
+    k3.metric("Units Shipped",   f"{int(cur_units):,}",     delta=pct_str(cur_units, prev_units))
+    k4.metric("Active Customers",f"{cur_df['customer_name'].nunique():,}")
+
+    div()
+
+    # ── Weekly FOB trend ──────────────────────────────────────────────────────
+    section_title(f"Weekly FOB Trend · {scope_lbl}")
+
+    weekly = (
+        dff.groupby(["delivery_year","delivery_week"])
+        .agg(fob=("total_price","sum"))
+        .reset_index()
+    )
+    weekly["Year"] = weekly["delivery_year"].astype(str)
+
+    fig_trend = px.line(
+        weekly, x="delivery_week", y="fob", color="Year",
+        labels={"delivery_week":"Week","fob":"FOB (USD)"},
+        color_discrete_sequence=PALETTE,
+        markers=True,
+    )
+    fig_trend.update_layout(
+        plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+        font_family="Jost", font_color="#1E1E1E",
+        hovermode="x unified",
+        margin=dict(l=0,r=0,t=10,b=0),
+        yaxis=dict(tickprefix="$ ", gridcolor="#F0EDE8", zeroline=False),
+        xaxis=dict(gridcolor="#F0EDE8", title="ISO Week"),
+        legend=dict(orientation="h", y=1.08, x=0),
+    )
+    fig_trend.update_traces(line_width=2, marker_size=4)
+    st.plotly_chart(fig_trend, use_container_width=True)
+
+    div()
+
+    # ── Country performance: last 3 years ─────────────────────────────────────
+    section_title(f"FOB by Destination Country · Last 3 Years ({scope_lbl})")
+
+    cy_grp = (
+        dff.groupby(["country","delivery_year"])
+        .agg(fob=("total_price","sum"), ships=("shipment_id","nunique"))
+        .reset_index()
+    )
+    cy_grp["Year"] = cy_grp["delivery_year"].astype(str)
+    cy_grp["label"] = cy_grp["country"].apply(lambda c: f"{flag(c)} {c}")
+
+    order = (
+        cy_grp[cy_grp["Year"]==cy]
+        .sort_values("fob", ascending=False)["country"].tolist()
+    )
+    others = [c for c in cy_grp["country"].unique() if c not in order]
+    full_order = order + others
+    cy_grp["sort_key"] = cy_grp["country"].apply(lambda c: full_order.index(c) if c in full_order else 999)
+    cy_grp = cy_grp.sort_values("sort_key")
+
+    fig_cntry = px.bar(
+        cy_grp, x="label", y="fob", color="Year", barmode="group",
+        labels={"label":"Country","fob":"FOB (USD)","Year":"Year"},
+        color_discrete_sequence=PALETTE,
+    )
+    fig_cntry.update_layout(
+        plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+        font_family="Jost", font_color="#1E1E1E",
+        margin=dict(l=0,r=0,t=10,b=0),
+        yaxis=dict(tickprefix="$ ", gridcolor="#F0EDE8", zeroline=False),
+        xaxis=dict(gridcolor="#F0EDE8", tickangle=-30),
+        legend=dict(orientation="h", y=1.08, x=0),
+        bargap=0.25, bargroupgap=0.05,
+    )
+    st.plotly_chart(fig_cntry, use_container_width=True)
+
+    div()
+
+    # ── Country performance table ─────────────────────────────────────────────
+    section_title(f"Country Status Table · {scope_lbl}")
+
+    piv_fob = cy_grp.pivot_table(index="country", columns="Year", values="fob",  aggfunc="sum").reset_index()
+    piv_shp = cy_grp.pivot_table(index="country", columns="Year", values="ships", aggfunc="sum").reset_index()
+
+    country_rows = []
+    all_ctry = piv_fob["country"].unique()
+    for c in all_ctry:
+        c_fob  = safe_float(safe_pivot_val(piv_fob, "country", c, cy))
+        p_fob  = safe_float(safe_pivot_val(piv_fob, "country", c, py))
+        p2_fob = safe_float(safe_pivot_val(piv_fob, "country", c, p2y))
+        c_shp  = safe_int(safe_pivot_val(piv_shp, "country", c, cy))
+        p_shp  = safe_int(safe_pivot_val(piv_shp, "country", c, py))
+        p2_shp = safe_int(safe_pivot_val(piv_shp, "country", c, p2y))
+        chg_py = pct_change(c_fob, p_fob)
+        chg_p2 = pct_change(c_fob, p2_fob)
+        st = status_badge(chg_py, c_fob)
+        country_rows.append({
+            "Country":              f"{flag(c)} {c}",
+            f"Ships {cy}":          c_shp,
+            f"Ships {py}":          p_shp or "—",
+            f"Ships {p2y}":         p2_shp or "—",
+            f"FOB {cy}":            f"$ {c_fob:,.0f}",
+            f"FOB {py}":            f"$ {p_fob:,.0f}" if p_fob else "—",
+            f"FOB {p2y}":           f"$ {p2_fob:,.0f}" if p2_fob else "—",
+            f"vs {py}":             f"{chg_py:+.1f}%" if chg_py is not None else "—",
+            f"vs {p2y}":            f"{chg_p2:+.1f}%" if chg_p2 is not None else "—",
+            "Status":               st,
+        })
+
+    country_rows.sort(key=lambda x: safe_float(x[f"FOB {cy}"].replace("$","").replace(",","")) if isinstance(x[f"FOB {cy}"],str) else 0, reverse=True)
+    st.dataframe(pd.DataFrame(country_rows), use_container_width=True, hide_index=True)
+
+    div()
+
+    # ── Customer × Country breakdown ──────────────────────────────────────────
+    section_title(f"Customer Performance by Country · {scope_lbl}")
+    note_box(
+        "Each country shows all customers active in any of the selected years. "
+        "Status compares current year FOB vs prior year. "
+        "Use this to identify where commercial attention is needed.",
+        "#8B3A3A")
+
+    # Build customer × country × year aggregation
+    ccy = (
+        dff.groupby(["country","customer_name","delivery_year"])
+        .agg(fob=("total_price","sum"), ships=("shipment_id","nunique"), units=("total_quantity","sum"))
+        .reset_index()
+    )
+
+    # Sort countries by current-year FOB
+    top_cntry = (
+        ccy[ccy["delivery_year"]==cur_year]
+        .groupby("country")["fob"].sum()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
+    other_c = [c for c in ccy["country"].unique() if c not in top_cntry]
+    ordered_countries = top_cntry + other_c
+
+    for country in ordered_countries:
+        cdf_c = ccy[ccy["country"]==country]
+        if cdf_c.empty: continue
+
+        tot_fob = safe_float(cdf_c[cdf_c["delivery_year"]==cur_year]["fob"].sum())
+        tot_shp = safe_int(cdf_c[cdf_c["delivery_year"]==cur_year]["ships"].sum())
+
+        with st.expander(f"{flag(country)}  {country}   ·   {tot_shp} shipments   ·   $ {tot_fob:,.0f} FOB  ({cy})", expanded=False):
+            piv_c_fob  = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="fob",   aggfunc="sum").reset_index()
+            piv_c_shp  = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="ships", aggfunc="sum").reset_index()
+            piv_c_unit = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="units", aggfunc="sum").reset_index()
+
+            cust_rows = []
+            for _, r in piv_c_fob.iterrows():
+                cname  = r["customer_name"]
+                cf     = safe_float(r.get(cur_year, 0))
+                pf     = safe_float(r.get(prev_year,  0))
+                p2f    = safe_float(r.get(prev2_year, 0))
+                cs     = safe_int(safe_pivot_val(piv_c_shp,  "customer_name", cname, cur_year))
+                ps     = safe_int(safe_pivot_val(piv_c_shp,  "customer_name", cname, prev_year))
+                cu     = safe_int(safe_pivot_val(piv_c_unit, "customer_name", cname, cur_year))
+                chg    = pct_change(cf, pf)
+                chg2   = pct_change(cf, p2f)
+                sbadge = status_badge(chg, cf)
+
+                cust_rows.append({
+                    "Customer":       cname,
+                    f"FOB {cy}":      f"$ {cf:,.0f}",
+                    f"FOB {py}":      f"$ {pf:,.0f}" if pf else "—",
+                    f"FOB {p2y}":     f"$ {p2f:,.0f}" if p2f else "—",
+                    f"vs {py}":       f"{chg:+.1f}%"  if chg  is not None else "—",
+                    f"vs {p2y}":      f"{chg2:+.1f}%" if chg2 is not None else "—",
+                    f"Ships {cy}":    cs,
+                    f"Ships {py}":    ps or "—",
+                    f"Units {cy}":    f"{cu:,}",
+                    "Status":         sbadge,
+                })
+
+            cust_rows.sort(key=lambda x: safe_float(x[f"FOB {cy}"].replace("$","").replace(",","").strip()) if isinstance(x[f"FOB {cy}"],str) else 0, reverse=True)
+
+            if cust_rows:
+                st.dataframe(pd.DataFrame(cust_rows), use_container_width=True, hide_index=True)
+
+                # Mini bar chart: top customers this year
+                cdf_cur = cdf_c[cdf_c["delivery_year"]==cur_year].sort_values("fob", ascending=False).head(12)
+                if not cdf_cur.empty:
+                    fig_mini = px.bar(
+                        cdf_cur, x="customer_name", y="fob",
+                        labels={"customer_name":"","fob":"FOB (USD)"},
+                        color_discrete_sequence=["#8B3A3A"],
+                    )
+                    fig_mini.update_layout(
+                        plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+                        font_family="Jost", font_color="#1E1E1E",
+                        margin=dict(l=0,r=0,t=6,b=0),
+                        height=220,
+                        yaxis=dict(tickprefix="$ ", gridcolor="#F0EDE8", zeroline=False),
+                        xaxis=dict(gridcolor="#F0EDE8", tickangle=-25),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_mini, use_container_width=True)
+
+    div()
+
+    # ── Growth focus panel ────────────────────────────────────────────────────
+    section_title("Growth Opportunity Focus")
+
+    decline = [r for r in country_rows if "Declining" in r["Status"] or "At risk" in r["Status"] or "Lost" in r["Status"]]
+    growing = [r for r in country_rows if "Growing"   in r["Status"] or "Strong"  in r["Status"]]
+    new_mkt = [r for r in country_rows if "New"       in r["Status"]]
+
+    g1, g2, g3 = st.columns(3)
+    def focus_list(col, label, color, items, fob_key):
+        col.markdown(f'<div style="font-family:Jost,sans-serif;font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:{color};margin-bottom:8px;">{label}</div>', unsafe_allow_html=True)
+        if not items:
+            col.caption("None")
+            return
+        for r in items:
+            chg = r.get(f"vs {py}", "—")
+            col.markdown(f'<div style="font-size:.84rem;padding:5px 0;border-bottom:1px solid #F0EDE8;color:#1E1E1E;">{r["Country"]}<span style="float:right;color:{color};font-size:.78rem;">{chg}</span></div>', unsafe_allow_html=True)
+
+    focus_list(g1, "⚠ Needs attention", "#8B3A3A", decline, f"FOB {cy}")
+    focus_list(g2, "✓ Growing markets",  "#7A9E8E", growing, f"FOB {cy}")
+    focus_list(g3, "✦ New markets",      "#C4974A", new_mkt, f"FOB {cy}")
+
+# ════════════════════════════════════════════════════════════════════════════
+# LOGISTICS
+# ════════════════════════════════════════════════════════════════════════════
 def render_by_destination(df, accent, dl_key):
     if df.empty:
         st.info("No shipments found for this period.")
@@ -219,40 +677,20 @@ def render_by_destination(df, accent, dl_key):
     for country in sorted(df["country"].unique()):
         cdf = df[df["country"]==country]
         airports = sorted(cdf["iata_code"].dropna().unique())
-        n_ship = cdf.groupby(SHIPMENT_KEYS).ngroups
-        fob_total = cdf["total_price"].sum()
-        fl = flag(country)
-        st.markdown(f"""
-        <div style="background:#FFFFFF;border:1px solid #EDE8E0;border-left:4px solid {accent};
-                    border-radius:6px;padding:10px 18px;margin:14px 0 4px 0;">
-          <span style="font-size:1.3rem;">{fl}</span>
-          <span style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;color:{accent};margin-left:8px;">{country}</span>
-          <span style="font-family:'Jost',sans-serif;font-size:.72rem;color:#8A9E85;letter-spacing:.08em;text-transform:uppercase;margin-left:12px;">
-            {n_ship} shipment{'s' if n_ship!=1 else ''} · $ {fob_total:,.0f} FOB
-          </span>
-        </div>""", unsafe_allow_html=True)
+        n_s  = n_shipments(cdf)
+        fob_t= safe_float(cdf["total_price"].sum())
+        country_header(country, n_s, fob_t, accent)
         for airport in airports:
-            adf = cdf[cdf["iata_code"]==airport]
-            n_ship_a = adf.groupby(SHIPMENT_KEYS).ngroups
-            n_prods  = len(adf)
-            units    = int(adf["total_quantity"].sum())
-            fob      = adf["total_price"].sum()
-            label = f"✈  {airport}  —  {n_ship_a} shipment{'s' if n_ship_a!=1 else ''}  ·  {n_prods} line{'s' if n_prods!=1 else ''}  ·  {units:,} units  ·  $ {fob:,.0f}"
-            with st.expander(label, expanded=(n_ship==1)):
+            adf    = cdf[cdf["iata_code"]==airport]
+            n_sa   = n_shipments(adf)
+            n_prod = len(adf)
+            units  = safe_int(adf["total_quantity"].sum())
+            fob_a  = safe_float(adf["total_price"].sum())
+            with st.expander(f"✈  {airport}  —  {n_sa} shipment{'s' if n_sa!=1 else ''}  ·  {n_prod} lines  ·  {units:,} units  ·  $ {fob_a:,.0f}", expanded=(n_s==1)):
                 for sid, sdf in adf.groupby("shipment_id", sort=False):
                     customer = sdf["customer_name"].iloc[0]
                     origin   = sdf["supply_source_name"].iloc[0]
-                    s_units  = int(sdf["total_quantity"].sum())
-                    s_fob    = sdf["total_price"].sum()
-                    n_lines  = len(sdf)
-                    st.markdown(f"""
-                    <div style="background:#FAF7F2;border:1px solid #EDE8E0;border-radius:6px;padding:10px 16px;margin:8px 0 4px 0;">
-                      <span style="font-family:'Cormorant Garamond',serif;font-size:1rem;font-weight:600;color:{accent};">📦 {customer}</span>
-                      <span style="font-family:'Jost',sans-serif;font-size:.75rem;color:#8A9E85;margin-left:10px;">from {origin}</span>
-                      <span style="font-family:'Jost',sans-serif;font-size:.72rem;color:#2C2825;margin-left:16px;letter-spacing:.05em;">
-                        {n_lines} line{'s' if n_lines!=1 else ''} · {s_units:,} units · $ {s_fob:,.2f} FOB
-                      </span>
-                    </div>""", unsafe_allow_html=True)
+                    shipment_card(customer, origin, len(sdf), safe_int(sdf["total_quantity"].sum()), safe_float(sdf["total_price"].sum()), accent)
                     line_cols = [c for c in ["crop_name","variety_name","product","total_quantity","total_price","order_type"] if c in sdf.columns]
                     line_df = sdf[line_cols].copy()
                     line_df.columns = [c.replace("_"," ").title() for c in line_df.columns]
@@ -261,392 +699,148 @@ def render_by_destination(df, accent, dl_key):
                     st.dataframe(line_df, use_container_width=True, hide_index=True)
     buf = io.BytesIO()
     df.to_excel(buf, index=False, engine="openpyxl")
-    st.download_button("⬇  Export full period to Excel", data=buf.getvalue(),
+    st.download_button("⬇  Export to Excel", data=buf.getvalue(),
         file_name="logistics_export.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"dl_{dl_key}")
 
-# ════════════════════════════════════════════════════════════════════════════
-# COMMERCIAL INTELLIGENCE PAGE
-# ════════════════════════════════════════════════════════════════════════════
-def render_commercial(df):
-    import plotly.express as px
+def render_logistics(df_all):
     import plotly.graph_objects as go
+    today    = date.today()
+    iso      = today.isocalendar()
+    cur_year, cur_week = iso[0], iso[1]
 
-    PLOTLY_COLORS = ["#9C4A52","#8A9E85","#B8974A","#2C2825","#C47A5A","#5A7A8A","#A8845A"]
+    VIEWS = [
+        (-1,"Past Week",    "Quality Follow-up",    "#8B3A3A",
+         "The logistics team must contact the customer to confirm receipt and quality. "
+         "If negative feedback is received, contact the <strong>Sales Manager immediately</strong>."),
+        ( 0,"Current Week", "Arrival Monitoring",   "#7A9E8E",
+         "Confirm material has arrived at destination. "
+         "Send all final documents including the <strong>final commercial invoice</strong>."),
+        ( 1,"Week +1",      "Dispatch Closure",     "#C4974A",
+         "Coordinate dispatch closure with customs agents. "
+         "<em>If documentation is incomplete, shipments may be delayed with prior <strong>Sales Manager approval</strong>.</em>"),
+        ( 2,"Week +2",      "Document Review",      "#4A6B8A",
+         "Review draft documents with customs agents: AWB, phytosanitary certificate, "
+         "commercial invoice, packing list, and certificate of origin."),
+        ( 3,"Week +3",      "Advance Preview",      "#6B4A8A",
+         "Verify special requirements: Colombia → certificate of origin; "
+         "Brazil &amp; Costa Rica → import permit. Ask customers about last-minute additions."),
+    ]
 
-    hero("Commercial Intelligence", "Year-over-Year Performance · Growth Analysis", color="#2C2825")
+    week_dfs = [filter_week(df_all, *add_weeks(cur_year, cur_week, d)) for d,*_ in VIEWS]
 
-    years = sorted(df["delivery_year"].dropna().astype(int).unique())
-    all_customers = sorted(df["customer_name"].dropna().unique())
-    all_countries = sorted(df["country"].dropna().unique())
-
-    # ── Filters ──────────────────────────────────────────────────────────────
-    with st.expander("🔍  Filter data", expanded=True):
-        fc1, fc2, fc3 = st.columns(3)
-        sel_years     = fc1.multiselect("Years", years, default=years, key="ci_years")
-        sel_customers = fc2.multiselect("Customers", all_customers, default=[], key="ci_customers", placeholder="All customers")
-        sel_countries = fc3.multiselect("Destination countries", all_countries, default=[], key="ci_countries", placeholder="All countries")
-
-    if not sel_years:
-        st.warning("Select at least one year to continue.")
-        return
-
-    dff = df[df["delivery_year"].isin(sel_years)].copy()
-    if sel_customers: dff = dff[dff["customer_name"].isin(sel_customers)]
-    if sel_countries: dff = dff[dff["country"].isin(sel_countries)]
-
-    if dff.empty:
-        st.info("No data matches the selected filters.")
-        return
-
-    cur_year  = max(sel_years)
-    prev_year = cur_year - 1
-
-    # ── YTD vs Full-Year toggle ───────────────────────────────────────────────
-    today_iso   = date.today().isocalendar()
-    current_week = today_iso[1]
-
-    ornament()
-    st.markdown("""
-    <div style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;
-                color:#2C2825;margin-bottom:6px;">Comparison Scope</div>""", unsafe_allow_html=True)
-
-    scope_col1, scope_col2 = st.columns([2,3])
-    with scope_col1:
-        scope = st.radio(
-            "scope", ["📅  Year-to-Date (fair comparison)", "📆  Full Year (all data in system)"],
-            label_visibility="collapsed", key="ci_scope"
-        )
-    with scope_col2:
-        if "YTD" in scope or "Year-to-Date" in scope:
-            st.markdown(f"""
-            <div style="background:#FFFFFF;border:1px solid #EDE8E0;border-left:3px solid #8A9E85;
-                        border-radius:6px;padding:10px 16px;font-family:'Jost',sans-serif;
-                        font-size:.82rem;color:#2C2825;line-height:1.7;">
-              Comparing <strong>Week 1 – Week {current_week}</strong> across all selected years.<br>
-              Prior years are capped at the same week so the comparison is apples-to-apples.
-            </div>""", unsafe_allow_html=True)
-        else:
-            max_week_cur  = int(dff[dff["delivery_year"]==cur_year]["delivery_week"].max()) if not dff[dff["delivery_year"]==cur_year].empty else current_week
-            max_week_prev = int(dff[dff["delivery_year"]==prev_year]["delivery_week"].max()) if prev_year in dff["delivery_year"].values else 0
-            st.markdown(f"""
-            <div style="background:#FFFFFF;border:1px solid #EDE8E0;border-left:3px solid #B8974A;
-                        border-radius:6px;padding:10px 16px;font-family:'Jost',sans-serif;
-                        font-size:.82rem;color:#2C2825;line-height:1.7;">
-              Comparing <strong>all weeks in the system</strong> per year.<br>
-              {cur_year}: up to week {max_week_cur} &nbsp;·&nbsp;
-              {prev_year}: up to week {max_week_prev if max_week_prev else "—"}
-            </div>""", unsafe_allow_html=True)
-
-    ornament()
-
-    # Apply YTD cap if selected
-    use_ytd = "YTD" in scope or "Year-to-Date" in scope
-    if use_ytd:
-        dff = dff[dff["delivery_week"] <= current_week]
-
-    def shipments_in(d): return d.groupby(SHIPMENT_KEYS)["shipment_id"].nunique().sum() if not d.empty else 0
-
-    cur_df  = dff[dff["delivery_year"]==cur_year]
-    prev_df = dff[dff["delivery_year"]==prev_year] if prev_year in dff["delivery_year"].values else pd.DataFrame()
-
-    cur_ship  = shipments_in(cur_df)
-    prev_ship = shipments_in(prev_df)
-    cur_fob   = cur_df["total_price"].sum()
-    prev_fob  = prev_df["total_price"].sum() if not prev_df.empty else 0
-    cur_units = cur_df["total_quantity"].sum()
-    prev_units= prev_df["total_quantity"].sum() if not prev_df.empty else 0
-
-    # ── YoY KPIs ──────────────────────────────────────────────────────────────
-    scope_label = f"YTD W1–W{current_week}" if use_ytd else "Full Year"
-    section_hdr(f"{scope_label} Summary  ·  {cur_year} vs {prev_year}", "#9C4A52")
-
-    k1,k2,k3,k4 = st.columns(4)
-    def delta_metric(col, label, cur, prev):
-        delta = pct_change(cur, prev)
-        delta_str = f"{delta:+.1f}%" if delta is not None else None
-        col.metric(label, f"{cur:,.0f}", delta=delta_str)
-
-    delta_metric(k1, "Shipments",    cur_ship,  prev_ship)
-    delta_metric(k2, "FOB Value (USD)", cur_fob,   prev_fob)
-    delta_metric(k3, "Units Shipped", cur_units, prev_units)
-    k4.metric("Active Customers", cur_df["customer_name"].nunique())
-
-    ornament()
-
-    # ── Weekly FOB trend by year ──────────────────────────────────────────────
-    section_hdr(f"Weekly FOB · Year-over-Year Trend  ({scope_label})", "#B8974A")
-
-    weekly = (
-        dff.groupby(["delivery_year","delivery_week"])
-        .agg(fob=("total_price","sum"), shipments=("shipment_id","nunique"))
-        .reset_index()
-    )
-    weekly["delivery_year"] = weekly["delivery_year"].astype(str)
-
-    fig_trend = px.line(
-        weekly, x="delivery_week", y="fob",
-        color="delivery_year",
-        labels={"delivery_week":"ISO Week","fob":"FOB (USD)","delivery_year":"Year"},
-        color_discrete_sequence=PLOTLY_COLORS,
-        markers=True,
-    )
-    fig_trend.update_layout(
-        plot_bgcolor="#FAF7F2", paper_bgcolor="#FAF7F2",
-        font_family="Jost", font_color="#2C2825",
-        legend_title_text="Year",
-        hovermode="x unified",
-        margin=dict(l=0,r=0,t=10,b=0),
-        yaxis=dict(tickprefix="$ ", gridcolor="#EDE8E0"),
-        xaxis=dict(gridcolor="#EDE8E0"),
-    )
-    st.plotly_chart(fig_trend, use_container_width=True)
-
-    ornament()
-
-    # ── FOB by Country · YoY comparison ──────────────────────────────────────
-    section_hdr("FOB by Destination Country · Year Comparison", "#9C4A52")
-
-    country_year = (
-        dff.groupby(["country","delivery_year"])
-        .agg(fob=("total_price","sum"), shipments=("shipment_id","nunique"))
-        .reset_index()
-    )
-    country_year["delivery_year"] = country_year["delivery_year"].astype(str)
-    country_year["flag_country"]  = country_year["country"].apply(lambda c: f"{flag(c)} {c}")
-
-    # sort countries by current year FOB descending
-    top_order = (
-        country_year[country_year["delivery_year"]==str(cur_year)]
-        .sort_values("fob", ascending=False)["country"].tolist()
-    )
-    other = [c for c in country_year["country"].unique() if c not in top_order]
-    order = top_order + other
-
-    country_year["sort_key"] = country_year["country"].apply(lambda c: order.index(c) if c in order else 999)
-    country_year = country_year.sort_values("sort_key")
-
-    fig_country = px.bar(
-        country_year, x="flag_country", y="fob",
-        color="delivery_year", barmode="group",
-        labels={"flag_country":"Country","fob":"FOB (USD)","delivery_year":"Year"},
-        color_discrete_sequence=PLOTLY_COLORS,
-    )
-    fig_country.update_layout(
-        plot_bgcolor="#FAF7F2", paper_bgcolor="#FAF7F2",
-        font_family="Jost", font_color="#2C2825",
-        legend_title_text="Year",
-        margin=dict(l=0,r=0,t=10,b=0),
-        yaxis=dict(tickprefix="$ ", gridcolor="#EDE8E0"),
-        xaxis=dict(gridcolor="#EDE8E0", tickangle=-30),
-    )
-    st.plotly_chart(fig_country, use_container_width=True)
-
-    ornament()
-
-    # ── YoY comparison table by country ──────────────────────────────────────
-    section_hdr("Country Performance Table · Growth Status", "#8A9E85")
-
-    pivot_fob = country_year.pivot_table(
-        index="country", columns="delivery_year", values="fob", aggfunc="sum"
-    ).reset_index()
-    pivot_ship = country_year.pivot_table(
-        index="country", columns="delivery_year", values="shipments", aggfunc="sum"
-    ).reset_index()
-
-    cy, py = str(cur_year), str(prev_year)
-    rows = []
-    for _, r in pivot_fob.iterrows():
-        c_fob  = r.get(cy, 0) or 0
-        p_fob  = r.get(py, 0) or 0
-        c_ship_row = pivot_ship[pivot_ship["country"]==r["country"]]
-        c_ship = c_ship_row[cy].values[0] if (not c_ship_row.empty and cy in c_ship_row.columns) else 0
-        p_ship = c_ship_row[py].values[0] if (not c_ship_row.empty and py in c_ship_row.columns) else 0
-
-        fob_chg  = pct_change(c_fob, p_fob)
-        ship_chg = pct_change(c_ship, p_ship)
-
-        if fob_chg is None:
-            status = "🆕 New"
-        elif c_fob == 0:
-            status = "🔴 Lost"
-        elif fob_chg >= 10:
-            status = "🟢 Growing"
-        elif fob_chg >= -5:
-            status = "🟡 Stable"
-        else:
-            status = "🔴 Declining"
-
-        rows.append({
-            "Country":                  f"{flag(r['country'])} {r['country']}",
-            f"Shipments {cy}":          int(c_ship),
-            f"Shipments {py}":          int(p_ship) if p_ship else "—",
-            f"FOB {cy}":                f"$ {c_fob:,.0f}",
-            f"FOB {py}":                f"$ {p_fob:,.0f}" if p_fob else "—",
-            "FOB Change":               f"{fob_chg:+.1f}%" if fob_chg is not None else "—",
-            "Status":                   status,
-        })
-
-    rows.sort(key=lambda x: float(x[f"FOB {cy}"].replace("$","").replace(",","")) if isinstance(x[f"FOB {cy}"], str) else 0, reverse=True)
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    ornament()
-
-    # ── Customer-level analysis ───────────────────────────────────────────────
-    section_hdr("Customer Performance · Year-over-Year", "#B8974A")
-
-    cust_year = (
-        dff.groupby(["customer_name","delivery_year"])
-        .agg(fob=("total_price","sum"), shipments=("shipment_id","nunique"), units=("total_quantity","sum"))
-        .reset_index()
-    )
-    cust_year["delivery_year"] = cust_year["delivery_year"].astype(str)
-
-    piv_cust_fob  = cust_year.pivot_table(index="customer_name", columns="delivery_year", values="fob",       aggfunc="sum").reset_index()
-    piv_cust_ship = cust_year.pivot_table(index="customer_name", columns="delivery_year", values="shipments", aggfunc="sum").reset_index()
-    piv_cust_unit = cust_year.pivot_table(index="customer_name", columns="delivery_year", values="units",     aggfunc="sum").reset_index()
-
-    cust_rows = []
-    for _, r in piv_cust_fob.iterrows():
-        c_fob   = r.get(cy, 0) or 0
-        p_fob   = r.get(py, 0) or 0
-        ship_r  = piv_cust_ship[piv_cust_ship["customer_name"]==r["customer_name"]]
-        unit_r  = piv_cust_unit[piv_cust_unit["customer_name"]==r["customer_name"]]
-        c_ship  = ship_r[cy].values[0] if (not ship_r.empty and cy in ship_r.columns) else 0
-        p_ship  = ship_r[py].values[0] if (not ship_r.empty and py in ship_r.columns) else 0
-        c_units = unit_r[cy].values[0] if (not unit_r.empty and cy in unit_r.columns) else 0
-
-        fob_chg = pct_change(c_fob, p_fob)
-
-        # Countries served this year
-        countries_cur = cur_df[cur_df["customer_name"]==r["customer_name"]]["country"].unique()
-        cntry_str = ", ".join(sorted([f"{flag(c)} {c}" for c in countries_cur]))
-
-        if fob_chg is None: status = "🆕 New"
-        elif c_fob == 0:    status = "🔴 Lost"
-        elif fob_chg >= 10: status = "🟢 Growing"
-        elif fob_chg >= -5: status = "🟡 Stable"
-        else:               status = "🔴 Declining"
-
-        cust_rows.append({
-            "Customer":           r["customer_name"],
-            f"FOB {cy}":          f"$ {c_fob:,.0f}",
-            f"FOB {py}":          f"$ {p_fob:,.0f}" if p_fob else "—",
-            "FOB Δ":              f"{fob_chg:+.1f}%" if fob_chg is not None else "—",
-            f"Ships {cy}":        int(c_ship),
-            f"Ships {py}":        int(p_ship) if p_ship else "—",
-            f"Units {cy}":        f"{int(c_units):,}",
-            "Destinations":       cntry_str,
-            "Status":             status,
-        })
-
-    cust_rows.sort(key=lambda x: float(x[f"FOB {cy}"].replace("$","").replace(",","").strip()) if isinstance(x[f"FOB {cy}"],str) else 0, reverse=True)
-    st.dataframe(pd.DataFrame(cust_rows), use_container_width=True, hide_index=True)
-
-    ornament()
-
-    # ── Week-by-week heatmap: FOB per customer per week ──────────────────────
-    section_hdr(f"Weekly FOB Heatmap · {cur_year} ({scope_label}) · by Customer", "#9C4A52")
-
-    heat_df = (
-        cur_df.groupby(["customer_name","delivery_week"])
-        .agg(fob=("total_price","sum"))
-        .reset_index()
-    )
-    if not heat_df.empty:
-        heat_pivot = heat_df.pivot_table(index="customer_name", columns="delivery_week", values="fob", aggfunc="sum").fillna(0)
-        # Top 20 customers by FOB
-        top20 = heat_pivot.sum(axis=1).nlargest(20).index
-        heat_pivot = heat_pivot.loc[top20]
-
-        fig_heat = go.Figure(data=go.Heatmap(
-            z=heat_pivot.values,
-            x=[f"W{int(w)}" for w in heat_pivot.columns],
-            y=heat_pivot.index.tolist(),
-            colorscale=[[0,"#FAF7F2"],[0.5,"#B8974A"],[1,"#9C4A52"]],
-            hoverongaps=False,
-            hovertemplate="Customer: %{y}<br>Week: %{x}<br>FOB: $ %{z:,.0f}<extra></extra>",
-        ))
-        fig_heat.update_layout(
-            plot_bgcolor="#FAF7F2", paper_bgcolor="#FAF7F2",
-            font_family="Jost", font_color="#2C2825",
-            margin=dict(l=0,r=0,t=10,b=0),
-            height=max(300, len(top20)*28),
-            xaxis=dict(side="top"),
-        )
-        st.plotly_chart(fig_heat, use_container_width=True)
-
-    ornament()
-
-    # ── Focus: where to grow ──────────────────────────────────────────────────
-    section_hdr("Growth Opportunity Focus", "#8A9E85")
-    alert_card(
-        "Countries and customers marked <strong>🔴 Declining</strong> or <strong>🔴 Lost</strong> "
-        "represent recovery opportunities. Those marked <strong>🆕 New</strong> indicate recent market entries to nurture. "
-        "Prioritize <strong>🟡 Stable</strong> accounts with high FOB for growth activation — "
-        "they have established relationships but untapped volume potential.",
-        "#8A9E85"
+    page_title(
+        "Logistics Dashboard",
+        f"ISO Week {cur_week}  ·  {today.strftime('%B %d, %Y')}  ·  Air Freight Operations"
     )
 
-    # Declining + lost countries
-    decline = [r for r in rows if "Declining" in r["Status"] or "Lost" in r["Status"]]
-    growing = [r for r in rows if "Growing"   in r["Status"]]
-    new_mkt = [r for r in rows if "New"       in r["Status"]]
+    tab_labels = ["Overview"] + [f"{v[1]}" for v in VIEWS]
+    all_tabs   = st.tabs(tab_labels)
 
-    c1,c2,c3 = st.columns(3)
-    with c1:
-        st.markdown('<div style="font-family:Jost,sans-serif;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#9C4A52;margin-bottom:6px;">⚠ Needs attention</div>', unsafe_allow_html=True)
-        for r in decline:
-            st.markdown(f'<div style="font-size:.84rem;padding:4px 0;border-bottom:1px solid #EDE8E0;">{r["Country"]} &nbsp; <span style="color:#9C4A52;">{r["FOB Change"]}</span></div>', unsafe_allow_html=True)
-        if not decline: st.caption("None — great!")
-    with c2:
-        st.markdown('<div style="font-family:Jost,sans-serif;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#2d7a4f;margin-bottom:6px;">✅ Growing markets</div>', unsafe_allow_html=True)
-        for r in growing:
-            st.markdown(f'<div style="font-size:.84rem;padding:4px 0;border-bottom:1px solid #EDE8E0;">{r["Country"]} &nbsp; <span style="color:#2d7a4f;">{r["FOB Change"]}</span></div>', unsafe_allow_html=True)
-        if not growing: st.caption("None yet")
-    with c3:
-        st.markdown('<div style="font-family:Jost,sans-serif;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#B8974A;margin-bottom:6px;">🆕 New markets</div>', unsafe_allow_html=True)
-        for r in new_mkt:
-            st.markdown(f'<div style="font-size:.84rem;padding:4px 0;border-bottom:1px solid #EDE8E0;">{r["Country"]}</div>', unsafe_allow_html=True)
-        if not new_mkt: st.caption("None")
+    # Overview
+    with all_tabs[0]:
+        all_5w = pd.concat(week_dfs, ignore_index=True) if any(not d.empty for d in week_dfs) else pd.DataFrame()
+
+        section_title("Five-Week Rolling Summary")
+        n_s = n_shipments(all_5w) if not all_5w.empty else 0
+        c1,c2,c3,c4,c5 = st.columns(5)
+        c1.metric("Shipments",     f"{n_s:,}")
+        c2.metric("Product Lines", f"{len(all_5w):,}")
+        c3.metric("Total Units",   f"{safe_int(all_5w['total_quantity'].sum() if not all_5w.empty else 0):,}")
+        c4.metric("FOB Value",     f"$ {safe_float(all_5w['total_price'].sum() if not all_5w.empty else 0):,.0f}")
+        c5.metric("Destinations",  f"{all_5w['country'].nunique() if not all_5w.empty else 0:,}")
+
+        div()
+        section_title("Weekly Breakdown")
+        rows = []
+        for i,(delta,wt,vt,accent,_) in enumerate(VIEWS):
+            vy,vw = add_weeks(cur_year,cur_week,delta)
+            wdf   = week_dfs[i]
+            lbl   = "Past" if delta==-1 else ("Current" if delta==0 else f"+{delta}w")
+            rows.append({
+                "Period":        f"{lbl} · {week_label(vy,vw)}",
+                "Stage":         vt,
+                "Shipments":     n_shipments(wdf) if not wdf.empty else 0,
+                "Lines":         len(wdf),
+                "Units":         f"{safe_int(wdf['total_quantity'].sum()):,}",
+                "FOB (USD)":     f"$ {safe_float(wdf['total_price'].sum()):,.0f}",
+                "Countries":     wdf["country"].nunique() if not wdf.empty else 0,
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        if not all_5w.empty:
+            div()
+            section_title("Destination Breakdown")
+            dest = (
+                all_5w.groupby(["country","iata_code"])
+                .agg(ships=("shipment_id","nunique"), lines=("total_quantity","count"),
+                     units=("total_quantity","sum"), fob=("total_price","sum"))
+                .reset_index().sort_values(["country","fob"], ascending=[True,False])
+            )
+            dest["Country"] = dest["country"].apply(lambda c: f"{flag(c)}  {c}")
+            dest = dest.rename(columns={"iata_code":"Airport","ships":"Shipments",
+                                        "lines":"Lines","units":"Units","fob":"FOB (USD)"})
+            dest["FOB (USD)"] = dest["FOB (USD)"].apply(lambda x: f"$ {x:,.0f}")
+            dest["Units"]     = dest["Units"].apply(lambda x: f"{int(x):,}")
+            st.dataframe(dest[["Country","Airport","Shipments","Lines","Units","FOB (USD)"]],
+                         use_container_width=True, hide_index=True)
+
+    # Individual week tabs
+    for tab,(delta,wt,vt,accent,msg),wdf in zip(all_tabs[1:],VIEWS,week_dfs):
+        with tab:
+            vy,vw = add_weeks(cur_year,cur_week,delta)
+            n_s   = n_shipments(wdf) if not wdf.empty else 0
+
+            section_title(f"{wt} — {vt}", accent)
+            st.markdown(f'<div style="font-family:Jost,sans-serif;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#9A9A9A;margin-bottom:12px;">{week_label(vy,vw)}</div>', unsafe_allow_html=True)
+            note_box(msg, accent)
+
+            c1,c2,c3,c4,c5 = st.columns(5)
+            c1.metric("Shipments",     f"{n_s:,}")
+            c2.metric("Product Lines", f"{len(wdf):,}")
+            c3.metric("Total Units",   f"{safe_int(wdf['total_quantity'].sum()):,}")
+            c4.metric("FOB Value",     f"$ {safe_float(wdf['total_price'].sum()):,.0f}")
+            c5.metric("Destinations",  f"{wdf['country'].nunique() if not wdf.empty else 0:,}")
+
+            div()
+            section_title("Shipments by Destination", accent)
+            render_by_destination(wdf, accent, dl_key=f"{delta}_{vw}_{vy}")
 
 # ════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("""
-    <div style="font-family:'Cormorant Garamond',serif;font-size:1.55rem;font-weight:600;
-                color:#FAF7F2;padding:10px 0 2px 0;letter-spacing:.04em;">✦ Export Ops</div>
-    <div style="font-family:'Jost',sans-serif;font-size:.7rem;letter-spacing:.14em;
-                text-transform:uppercase;color:#8A9E85;margin-bottom:18px;">Management Suite</div>
+    <div style="padding:24px 0 8px 0;">
+      <div style="font-family:\'Cormorant Garamond\',serif;font-size:1.5rem;font-weight:400;
+                  color:#1E1E1E;letter-spacing:.02em;">✦ Export Ops</div>
+      <div style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.16em;
+                  text-transform:uppercase;color:#9A9A9A;margin-top:2px;">Management Suite</div>
+    </div>
+    <div style="border-top:1px solid #E8E4DC;margin:12px 0 16px 0;"></div>
     """, unsafe_allow_html=True)
-    st.markdown("---")
 
-    # ── Page selector ─────────────────────────────────────────────────────────
-    st.markdown('<p style="font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#B8974A;">Navigation</p>', unsafe_allow_html=True)
-    page = st.radio(
-        "page", ["📦  Logistics",  "📈  Commercial Intelligence"],
-        label_visibility="collapsed",
-        key="page_selector"
-    )
+    st.markdown('<p style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.14em;text-transform:uppercase;color:#9A9A9A;margin-bottom:6px;">Navigation</p>', unsafe_allow_html=True)
+    page = st.radio("page", ["📦  Logistics", "📈  Commercial Intelligence"],
+                    label_visibility="collapsed", key="page_selector")
 
-    st.markdown("---")
-    st.markdown('<p style="font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#B8974A;">📂 Data Source</p>', unsafe_allow_html=True)
+    st.markdown('<div style="border-top:1px solid #E8E4DC;margin:16px 0;"></div>', unsafe_allow_html=True)
+    st.markdown('<p style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.14em;text-transform:uppercase;color:#9A9A9A;margin-bottom:6px;">Data Source</p>', unsafe_allow_html=True)
     uploaded = st.file_uploader("Upload Excel file", type=["xlsx","xls"], label_visibility="collapsed")
 
     if "df" in st.session_state and st.session_state.df is not None:
         st.markdown(f"""
-        <div style="background:#3a3330;border-radius:6px;padding:12px 14px;margin-top:8px;
-                    font-family:'Jost',sans-serif;font-size:.75rem;color:#EDE8E0;line-height:1.8;">
-          <span style="color:#B8974A;">📄</span> {st.session_state.filename}<br>
-          <span style="color:#8A9E85;">Updated:</span> {st.session_state.loaded_at}<br>
-          <span style="color:#8A9E85;">Records:</span> {len(st.session_state.df):,}
+        <div style="background:#FAFAF8;border:1px solid #E8E4DC;padding:12px 14px;margin-top:8px;
+                    font-family:Jost,sans-serif;font-size:.75rem;color:#5A5A5A;line-height:1.9;">
+          <span style="color:#C4974A;">●</span> {st.session_state.filename}<br>
+          <span style="color:#9A9A9A;">Updated</span>  {st.session_state.loaded_at}<br>
+          <span style="color:#9A9A9A;">Records</span>  {len(st.session_state.df):,}
         </div>""", unsafe_allow_html=True)
 
         if page == "📦  Logistics":
-            st.markdown("---")
-            st.markdown('<p style="font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#B8974A;">Filters</p>', unsafe_allow_html=True)
+            st.markdown('<div style="border-top:1px solid #E8E4DC;margin:16px 0;"></div>', unsafe_allow_html=True)
+            st.markdown('<p style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.14em;text-transform:uppercase;color:#9A9A9A;margin-bottom:6px;">Filters</p>', unsafe_allow_html=True)
             origins   = st.multiselect("Origin",   sorted(st.session_state.df["supply_source_name"].dropna().unique()), placeholder="All origins",   key="log_origins")
             customers = st.multiselect("Customer", sorted(st.session_state.df["customer_name"].dropna().unique()),       placeholder="All customers", key="log_customers")
             st.session_state.origins   = origins
@@ -664,145 +858,48 @@ if uploaded is not None:
     if "origins"   not in st.session_state: st.session_state.origins   = []
     if "customers" not in st.session_state: st.session_state.customers = []
 
-# ── Welcome screen ────────────────────────────────────────────────────────────
+# ── Welcome ───────────────────────────────────────────────────────────────────
 if "df" not in st.session_state or st.session_state.df is None:
-    hero("Export Operations Suite", "Logistics · Commercial Intelligence · Air Freight")
     st.markdown("""
-    <div style="background:#FFFFFF;border:1px solid #EDE8E0;border-radius:8px;
-                padding:36px 42px;max-width:700px;margin:0 auto;text-align:center;">
-      <div style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;color:#9C4A52;margin-bottom:10px;">
-        Upload your data file to begin</div>
-      <div style="font-family:'Jost',sans-serif;font-size:.84rem;color:#2C2825;line-height:1.9;margin-bottom:22px;">
-        Use the <strong>sidebar uploader</strong> to load your weekly Excel export.<br>
-        Navigate between <strong>Logistics</strong> and <strong>Commercial Intelligence</strong> using the sidebar menu.
+    <div style="max-width:680px;margin:80px auto;text-align:center;padding:0 20px;">
+      <div style="font-family:\'Cormorant Garamond\',serif;font-size:3rem;font-weight:300;
+                  color:#1E1E1E;letter-spacing:.02em;line-height:1.2;margin-bottom:8px;">
+        Export Operations Suite
       </div>
-      <div style="background:#FAF7F2;border-radius:6px;padding:16px 22px;font-family:'Jost',sans-serif;
-                  font-size:.78rem;color:#2C2825;text-align:left;line-height:2;">
-        <strong style="color:#B8974A;">Required columns</strong><br>
-        delivery_year · delivery_week · customer_name · supply_source_name · destination · total_quantity · total_price<br><br>
-        <strong style="color:#8A9E85;">Optional columns</strong><br>
-        secondary_customer_name · crop_name · variety_name · order_type · product
+      <div style="font-family:Jost,sans-serif;font-size:.75rem;letter-spacing:.18em;text-transform:uppercase;
+                  color:#9A9A9A;margin-bottom:40px;">
+        Fresh Flowers &amp; Vegetables · Air Freight
+      </div>
+      <div style="border-top:1px solid #E8E4DC;padding-top:32px;">
+        <div style="font-family:Jost,sans-serif;font-size:.9rem;color:#5A5A5A;line-height:1.9;margin-bottom:28px;">
+          Upload your weekly Excel file using the <strong>sidebar uploader</strong>.<br>
+          Navigate between <strong>Logistics</strong> and <strong>Commercial Intelligence</strong>.
+        </div>
+        <div style="background:#FAFAF8;border:1px solid #E8E4DC;border-top:2px solid #8B3A3A;
+                    padding:20px 28px;text-align:left;">
+          <div style="font-family:Jost,sans-serif;font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+                      color:#8B3A3A;margin-bottom:12px;">Required columns</div>
+          <div style="font-family:Jost,sans-serif;font-size:.82rem;color:#5A5A5A;line-height:2;">
+            delivery_year · delivery_week · customer_name<br>
+            supply_source_name · destination · total_quantity · total_price
+          </div>
+          <div style="font-family:Jost,sans-serif;font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+                      color:#9A9A9A;margin:16px 0 8px 0;">Optional columns</div>
+          <div style="font-family:Jost,sans-serif;font-size:.82rem;color:#9A9A9A;line-height:2;">
+            secondary_customer_name · crop_name · variety_name · order_type · product
+          </div>
+        </div>
       </div>
     </div>""", unsafe_allow_html=True)
     st.stop()
 
-# ════════════════════════════════════════════════════════════════════════════
-# PAGE ROUTING
-# ════════════════════════════════════════════════════════════════════════════
-
-# ── COMMERCIAL INTELLIGENCE ───────────────────────────────────────────────────
+# ── Routing ───────────────────────────────────────────────────────────────────
 if page == "📈  Commercial Intelligence":
     render_commercial(st.session_state.df.copy())
-    st.stop()
-
-# ── LOGISTICS PAGE ────────────────────────────────────────────────────────────
-df_all = apply_filters(
-    st.session_state.df.copy(),
-    st.session_state.get("origins",[]),
-    st.session_state.get("customers",[])
-)
-today    = date.today()
-iso      = today.isocalendar()
-cur_year, cur_week = iso[0], iso[1]
-
-VIEWS = [
-    (-1,"Past Week",    "Quality Follow-up",     "#9C4A52",
-     "The logistics team must contact the customer to confirm receipt and material quality. "
-     "If negative feedback is received, contact the <strong>Sales Manager immediately</strong>."),
-    ( 0,"Current Week", "Arrival Monitoring",    "#8A9E85",
-     "Confirm with the customer that material has arrived at destination. "
-     "Send all final documents including the <strong>final commercial invoice</strong>."),
-    ( 1,"Week +1",      "Dispatch Closure",      "#B8974A",
-     "Coordinate dispatch closure with customs agents. "
-     "<em>If documentation has not been fully reviewed, shipments may be delayed one week "
-     "with prior <strong>Sales Manager approval</strong>.</em>"),
-    ( 2,"Week +2",      "Document Review",       "#9C4A52",
-     "Review draft documents with customs agents: AWB, phytosanitary certificate, "
-     "commercial invoice, packing list, and certificate of origin."),
-    ( 3,"Week +3",      "Advance Order Preview", "#8A9E85",
-     "Verify special requirements by origin: Colombia → certificate of origin; "
-     "Brazil &amp; Costa Rica → import permit. "
-     "Ask the customer if they wish to add a last-minute order based on availability per origin."),
-]
-
-week_dfs = [filter_week(df_all, *add_weeks(cur_year, cur_week, d)) for d,*_ in VIEWS]
-
-hero("Export Logistics Dashboard",
-     f"ISO Week {cur_week} · {today.strftime('%B %d, %Y')} · Air Freight Operations")
-
-tab_labels = ["📊  Overview"] + [f"{v[1]}  ·  {v[2]}" for v in VIEWS]
-all_tabs   = st.tabs(tab_labels)
-
-# ── Overview tab ──────────────────────────────────────────────────────────────
-with all_tabs[0]:
-    ornament()
-    st.markdown("""
-    <div style="font-family:'Cormorant Garamond',serif;font-size:1.45rem;font-weight:600;
-                color:#9C4A52;margin-bottom:4px;">Global Operations Overview</div>
-    <div style="font-family:'Jost',sans-serif;font-size:.74rem;letter-spacing:.12em;
-                text-transform:uppercase;color:#8A9E85;margin-bottom:16px;">
-      Five-week rolling window · Weeks −1 through +3</div>""", unsafe_allow_html=True)
-
-    all_5w = pd.concat(week_dfs, ignore_index=True) if any(not d.empty for d in week_dfs) else pd.DataFrame()
-    section_hdr("Rolling 5-Week Summary", "#9C4A52")
-    n_ship = all_5w.groupby(SHIPMENT_KEYS).ngroups if not all_5w.empty else 0
-    kpi_row(n_ship, len(all_5w),
-            all_5w["total_quantity"].sum() if not all_5w.empty else 0,
-            all_5w["total_price"].sum()    if not all_5w.empty else 0,
-            all_5w["country"].nunique()    if not all_5w.empty else 0)
-    ornament()
-    section_hdr("Weekly Breakdown by Shipment", "#B8974A")
-    rows = []
-    for i,(delta,week_title,view_title,accent,_) in enumerate(VIEWS):
-        vy,vw = add_weeks(cur_year,cur_week,delta)
-        wdf   = week_dfs[i]
-        label = "← Past" if delta==-1 else ("▶ Current" if delta==0 else f"+{delta}w")
-        n_s   = wdf.groupby(SHIPMENT_KEYS).ngroups if not wdf.empty else 0
-        rows.append({
-            "Period":        f"{label}  {week_label(vy,vw)}",
-            "Stage":         view_title,
-            "Shipments":     n_s,
-            "Product Lines": len(wdf),
-            "Units":         f"{int(wdf['total_quantity'].sum()):,}",
-            "FOB (USD)":     f"$ {wdf['total_price'].sum():,.0f}",
-            "Destinations":  wdf["country"].nunique() if not wdf.empty else 0,
-            "Countries":     ", ".join(sorted(wdf["country"].unique())) if not wdf.empty else "—",
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    ornament()
-    section_hdr("Destination Breakdown · All Active Weeks", "#8A9E85")
-    if not all_5w.empty:
-        dest = (
-            all_5w.groupby(["country","iata_code"])
-            .agg(shipments=("shipment_id","nunique"), product_lines=("total_quantity","count"),
-                 units=("total_quantity","sum"), fob=("total_price","sum"))
-            .reset_index().sort_values(["country","fob"], ascending=[True,False])
-        )
-        dest["Flag + Country"] = dest["country"].map(lambda c: f"{flag(c)}  {c}")
-        dest = dest.rename(columns={"iata_code":"Airport","shipments":"Shipments",
-                                    "product_lines":"Product Lines","units":"Units","fob":"FOB (USD)"})
-        dest["FOB (USD)"] = dest["FOB (USD)"].apply(lambda x: f"$ {x:,.0f}")
-        dest["Units"]     = dest["Units"].apply(lambda x: f"{int(x):,}")
-        st.dataframe(dest[["Flag + Country","Airport","Shipments","Product Lines","Units","FOB (USD)"]],
-                     use_container_width=True, hide_index=True)
-    else:
-        st.info("No data for the five-week window.")
-
-# ── Logistics view tabs ───────────────────────────────────────────────────────
-for tab,(delta,week_title,view_title,accent,msg),wdf in zip(all_tabs[1:],VIEWS,week_dfs):
-    with tab:
-        vy,vw  = add_weeks(cur_year,cur_week,delta)
-        n_ship = wdf.groupby(SHIPMENT_KEYS).ngroups if not wdf.empty else 0
-        ornament()
-        st.markdown(f"""
-        <div style="font-family:'Cormorant Garamond',serif;font-size:1.45rem;font-weight:600;
-                    color:{accent};margin-bottom:2px;">{week_title} — {view_title}</div>
-        <div style="font-family:'Jost',sans-serif;font-size:.74rem;letter-spacing:.12em;
-                    text-transform:uppercase;color:#8A9E85;margin-bottom:12px;">{week_label(vy,vw)}</div>
-        """, unsafe_allow_html=True)
-        alert_card(msg, accent)
-        kpi_row(n_ship, len(wdf), wdf["total_quantity"].sum(), wdf["total_price"].sum(),
-                wdf["country"].nunique() if not wdf.empty else 0)
-        ornament()
-        section_hdr("Shipments by Destination Country & Airport", accent)
-        render_by_destination(wdf, accent, dl_key=f"{delta}_{vw}_{vy}")
+else:
+    df_log = apply_filters(
+        st.session_state.df.copy(),
+        st.session_state.get("origins", []),
+        st.session_state.get("customers", [])
+    )
+    render_logistics(df_log)
