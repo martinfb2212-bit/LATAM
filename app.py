@@ -1,8 +1,710 @@
-import streamlit as st
+def render_commercial(df):
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    years_avail   = sorted(df["delivery_year"].dropna().astype(int).unique())
+    all_customers = sorted(df["customer_name"].dropna().unique())
+    all_countries = sorted(c for c in df["country"].dropna().unique() if c not in EXCLUDED_COUNTRIES)
+
+    page_header("Commercial Intelligence",
+                "Year-over-Year Performance  ·  Growth Analysis  ·  Market Focus")
+
+    ci_tabs = st.tabs([
+        "📊  Overview & YoY",
+        "🎯  Country Targets",
+        "👥  Customer Intelligence",
+        "📅  Seasonality",
+    ])
+
+    # ── Shared filters ────────────────────────────────────────────────────────
+    today_iso    = date.today().isocalendar()
+    current_week = today_iso[1]
+
+    with st.expander("⚙  Filters & Scope", expanded=True):
+        sc1, sc2 = st.columns([1, 2])
+        with sc1:
+            scope = st.radio("Scope", ["📅  Year-to-Date", "📆  Full Year"], key="ci_scope")
+        use_ytd = "Year-to-Date" in scope
+        with sc2:
+            if use_ytd:
+                info_strip(f"Comparing <strong>Week 1 – Week {current_week}</strong> across all years. Prior years capped at week {current_week}.", "#2D4A3E")
+            else:
+                info_strip("Comparing <strong>all weeks in the system</strong> per year — including future confirmed orders.", "#B8924A")
+
+        fc1, fc2, fc3 = st.columns(3)
+        default_years = years_avail[-3:] if len(years_avail) >= 3 else years_avail
+        sel_years     = fc1.multiselect("Years", years_avail, default=default_years, key="ci_years")
+        sel_customers = fc2.multiselect("Customers", all_customers, default=[], key="ci_customers", placeholder="All customers")
+        sel_countries = fc3.multiselect("Countries", all_countries, default=[], key="ci_countries", placeholder="All countries")
+
+    if not sel_years:
+        st.warning("Select at least one year.")
+        return
+
+    dff = df[df["delivery_year"].isin(sel_years)].copy()
+    dff = dff[~dff["country"].isin(EXCLUDED_COUNTRIES)]
+    if sel_customers: dff = dff[dff["customer_name"].isin(sel_customers)]
+    if sel_countries: dff = dff[dff["country"].isin(sel_countries)]
+    if use_ytd:       dff = dff[dff["delivery_week"] <= current_week]
+
+    if dff.empty:
+        st.info("No data matches the selected filters.")
+        return
+
+    cur_year   = max(sel_years)
+    prev_year  = cur_year - 1
+    prev2_year = cur_year - 2
+    cy, py, p2y = str(cur_year), str(prev_year), str(prev2_year)
+    scope_lbl = f"YTD W1–W{current_week}" if use_ytd else "Full Year"
+
+    cur_df   = dff[dff["delivery_year"]==cur_year]
+    prev_df  = dff[dff["delivery_year"]==prev_year]  if prev_year  in dff["delivery_year"].values else pd.DataFrame()
+    prev2_df = dff[dff["delivery_year"]==prev2_year] if prev2_year in dff["delivery_year"].values else pd.DataFrame()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 1 — OVERVIEW & YOY
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[0]:
+        section_label(f"Summary  ·  {scope_lbl}  ·  {cur_year} vs {prev_year}")
+
+        cur_ship  = n_shipments(cur_df)
+        prev_ship = n_shipments(prev_df)
+        cur_fob   = safe_float(cur_df["total_price"].sum())
+        prev_fob  = safe_float(prev_df["total_price"].sum()) if not prev_df.empty else 0.0
+        cur_units = safe_float(cur_df["total_quantity"].sum())
+        prev_units= safe_float(prev_df["total_quantity"].sum()) if not prev_df.empty else 0.0
+
+        k1,k2,k3,k4 = st.columns(4)
+        k1.metric("Shipments",        f"{cur_ship:,}",       delta=metric_delta_str(cur_ship,  prev_ship))
+        k2.metric("FOB Value",        f"$ {cur_fob:,.0f}",   delta=metric_delta_str(cur_fob,   prev_fob))
+        k3.metric("Units Shipped",    f"{int(cur_units):,}", delta=metric_delta_str(cur_units, prev_units))
+        k4.metric("Active Customers", f"{cur_df['customer_name'].nunique():,}")
+
+        divider()
+        section_label(f"Weekly FOB Trend  ·  {scope_lbl}")
+        weekly = dff.groupby(["delivery_year","delivery_week"]).agg(fob=("total_price","sum")).reset_index()
+        weekly["Year"] = weekly["delivery_year"].astype(str)
+        fig_trend = px.line(weekly, x="delivery_week", y="fob", color="Year",
+                            labels={"delivery_week":"ISO Week","fob":"FOB (USD)"},
+                            color_discrete_sequence=PALETTE, markers=True)
+        fig_trend.update_traces(line_width=2.5, marker_size=5)
+        fig_trend.update_yaxes(tickprefix="$ ")
+        plotly_layout(fig_trend, height=320)
+        st.plotly_chart(fig_trend, use_container_width=True)
+
+        divider()
+        section_label("FOB by Country  ·  3-Year Comparison")
+        cy_grp = dff.groupby(["country","delivery_year"]).agg(
+            fob=("total_price","sum"), ships=("shipment_id","nunique")).reset_index()
+        cy_grp["Year"]  = cy_grp["delivery_year"].astype(str)
+        cy_grp["label"] = cy_grp["country"].apply(lambda c: f"{flag(c)} {c}")
+        order = cy_grp[cy_grp["Year"]==cy].sort_values("fob", ascending=False)["country"].tolist()
+        cy_grp["sort_key"] = cy_grp["country"].apply(lambda c: order.index(c) if c in order else 999)
+        cy_grp = cy_grp.sort_values("sort_key")
+        fig_cntry = px.bar(cy_grp, x="label", y="fob", color="Year", barmode="group",
+                           labels={"label":"Country","fob":"FOB (USD)"},
+                           color_discrete_sequence=PALETTE)
+        fig_cntry.update_yaxes(tickprefix="$ ")
+        fig_cntry.update_xaxes(tickangle=-35)
+        plotly_layout(fig_cntry, height=360)
+        st.plotly_chart(fig_cntry, use_container_width=True)
+
+        divider()
+        section_label(f"Country Status Table  ·  {scope_lbl}")
+        piv_fob = cy_grp.pivot_table(index="country", columns="Year", values="fob",   aggfunc="sum").reset_index()
+        piv_shp = cy_grp.pivot_table(index="country", columns="Year", values="ships", aggfunc="sum").reset_index()
+        country_rows = []
+        for c in piv_fob["country"].unique():
+            c_fob  = safe_float(safe_pivot_val(piv_fob,"country",c,cy))
+            p_fob  = safe_float(safe_pivot_val(piv_fob,"country",c,py))
+            p2_fob = safe_float(safe_pivot_val(piv_fob,"country",c,p2y))
+            c_shp  = safe_int(safe_pivot_val(piv_shp,"country",c,cy))
+            p_shp  = safe_int(safe_pivot_val(piv_shp,"country",c,py))
+            p2_shp = safe_int(safe_pivot_val(piv_shp,"country",c,p2y))
+            chg_py = pct_change(c_fob,p_fob)
+            chg_p2 = pct_change(c_fob,p2_fob)
+            badge  = status_badge(chg_py,c_fob)
+            country_rows.append({
+                "Country":      f"{flag(c)} {c}",
+                f"Ships {cy}":  c_shp,
+                f"Ships {py}":  p_shp  or "—",
+                f"Ships {p2y}": p2_shp or "—",
+                f"FOB {cy}":    f"$ {c_fob:,.0f}",
+                f"FOB {py}":    f"$ {p_fob:,.0f}"  if p_fob  else "—",
+                f"FOB {p2y}":   f"$ {p2_fob:,.0f}" if p2_fob else "—",
+                f"vs {py}":     f"{chg_py:+.1f}%"  if chg_py is not None else "—",
+                f"vs {p2y}":    f"{chg_p2:+.1f}%"  if chg_p2 is not None else "—",
+                "Status":       badge,
+            })
+        country_rows.sort(
+            key=lambda x: safe_float(str(x[f"FOB {cy}"]).replace("$","").replace(",","")),
+            reverse=True)
+        st.dataframe(pd.DataFrame(country_rows), use_container_width=True, hide_index=True)
+
+        divider()
+        section_label(f"Customer Performance by Country  ·  {scope_lbl}")
+        info_strip("Each country panel shows every customer active in any selected year.", "#8C3D3D")
+        ccy = dff.groupby(["country","customer_name","delivery_year"]).agg(
+            fob=("total_price","sum"), ships=("shipment_id","nunique"),
+            units=("total_quantity","sum")).reset_index()
+        top_cntry = (ccy[ccy["delivery_year"]==cur_year]
+                     .groupby("country")["fob"].sum()
+                     .sort_values(ascending=False).index.tolist())
+        for country in top_cntry + [c for c in ccy["country"].unique() if c not in top_cntry]:
+            cdf_c = ccy[ccy["country"]==country]
+            if cdf_c.empty: continue
+            tot_fob = safe_float(cdf_c[cdf_c["delivery_year"]==cur_year]["fob"].sum())
+            tot_shp = safe_int(cdf_c[cdf_c["delivery_year"]==cur_year]["ships"].sum())
+            with st.expander(
+                f"{flag(country)}  {country}   ·   {tot_shp} shipments   ·   $ {tot_fob:,.0f}  ({scope_lbl} {cur_year})",
+                expanded=False):
+                piv_c_fob  = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="fob",   aggfunc="sum").reset_index()
+                piv_c_shp  = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="ships", aggfunc="sum").reset_index()
+                piv_c_unit = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="units", aggfunc="sum").reset_index()
+                cust_rows = []
+                for _, r in piv_c_fob.iterrows():
+                    cname  = r["customer_name"]
+                    cf     = safe_float(r.get(cur_year,   0))
+                    pf     = safe_float(r.get(prev_year,  0))
+                    p2f    = safe_float(r.get(prev2_year, 0))
+                    cs     = safe_int(safe_pivot_val(piv_c_shp,  "customer_name", cname, cur_year))
+                    ps     = safe_int(safe_pivot_val(piv_c_shp,  "customer_name", cname, prev_year))
+                    cu     = safe_int(safe_pivot_val(piv_c_unit, "customer_name", cname, cur_year))
+                    chg    = pct_change(cf, pf)
+                    chg2   = pct_change(cf, p2f)
+                    cbadge = status_badge(chg, cf)
+                    cust_rows.append({
+                        "Customer":     cname,
+                        f"FOB {cy}":    f"$ {cf:,.0f}",
+                        f"FOB {py}":    f"$ {pf:,.0f}"  if pf  else "—",
+                        f"FOB {p2y}":   f"$ {p2f:,.0f}" if p2f else "—",
+                        f"vs {py}":     f"{chg:+.1f}%"  if chg  is not None else "—",
+                        f"vs {p2y}":    f"{chg2:+.1f}%" if chg2 is not None else "—",
+                        f"Ships {cy}":  cs,
+                        f"Ships {py}":  ps or "—",
+                        f"Units {cy}":  f"{cu:,}",
+                        "Status":       cbadge,
+                    })
+                cust_rows.sort(
+                    key=lambda x: safe_float(str(x[f"FOB {cy}"]).replace("$","").replace(",","")),
+                    reverse=True)
+                if cust_rows:
+                    st.dataframe(pd.DataFrame(cust_rows), use_container_width=True, hide_index=True)
+                    cdf_cur = cdf_c[cdf_c["delivery_year"]==cur_year].sort_values("fob", ascending=False).head(12)
+                    if not cdf_cur.empty:
+                        fig_mini = px.bar(cdf_cur, x="customer_name", y="fob",
+                                          labels={"customer_name":"","fob":"FOB (USD)"},
+                                          color_discrete_sequence=["#8C3D3D"])
+                        fig_mini.update_yaxes(tickprefix="$ ")
+                        fig_mini.update_xaxes(tickangle=-30)
+                        plotly_layout(fig_mini, height=200)
+                        st.plotly_chart(fig_mini, use_container_width=True)
+
+        divider()
+        section_label("Growth Opportunity Focus")
+        decline = [r for r in country_rows if any(k in r["Status"] for k in ["Declining","At risk","Lost"])]
+        growing = [r for r in country_rows if any(k in r["Status"] for k in ["Growing","Strong"])]
+        new_mkt = [r for r in country_rows if "New" in r["Status"]]
+        g1,g2,g3 = st.columns(3)
+        def focus_col(col, title, color, items):
+            col.markdown(
+                f'<div style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.16em;'
+                f'text-transform:uppercase;color:{color};margin-bottom:10px;padding-bottom:8px;'
+                f'border-bottom:2px solid {color};">{title}</div>', unsafe_allow_html=True)
+            if not items:
+                col.markdown('<div style="font-family:Jost,sans-serif;font-size:.82rem;color:#7A7A7A;padding:6px 0;">None</div>', unsafe_allow_html=True)
+            for r in items:
+                chg = r.get(f"vs {py}","—")
+                col.markdown(
+                    f'<div style="display:flex;justify-content:space-between;padding:7px 0;'
+                    f'border-bottom:1px solid #EDE9E3;">'
+                    f'<span style="font-family:Jost,sans-serif;font-size:.82rem;color:#1A1A1A;">{r["Country"]}</span>'
+                    f'<span style="font-family:Jost,sans-serif;font-size:.75rem;font-weight:500;color:{color};">{chg}</span>'
+                    f'</div>', unsafe_allow_html=True)
+        focus_col(g1,"Needs attention","#8C3D3D",decline)
+        focus_col(g2,"Growing markets","#2D4A3E",growing)
+        focus_col(g3,"New markets","#B8924A",new_mkt)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 2 — COUNTRY TARGETS
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[1]:
+        section_label(f"Country Growth Targets  ·  {cur_year}  ·  {scope_lbl}", "#8C3D3D")
+        info_strip(
+            f"Set a FOB growth target (%) per country for <strong>{cur_year}</strong>. "
+            f"The dashboard calculates the required FOB, your current gap, and pace vs the {current_week}-week mark.",
+            "#2D4A3E")
+
+        # Build base data
+        cntry_cur  = cur_df.groupby("country").agg(fob_cur=("total_price","sum"),  ships_cur=("shipment_id","nunique")).reset_index()
+        cntry_prev = prev_df.groupby("country").agg(fob_prev=("total_price","sum")).reset_index() if not prev_df.empty else pd.DataFrame(columns=["country","fob_prev"])
+        cntry_base = cntry_cur.merge(cntry_prev, on="country", how="outer").fillna(0)
+
+        # Add countries that existed last year but have 0 this year
+        if not prev_df.empty:
+            prev_only = prev_df[~prev_df["country"].isin(cntry_base["country"])].groupby("country").agg(fob_prev=("total_price","sum")).reset_index()
+            prev_only["fob_cur"] = 0.0
+            prev_only["ships_cur"] = 0
+            cntry_base = pd.concat([cntry_base, prev_only], ignore_index=True)
+
+        active_countries = sorted(cntry_base[cntry_base["fob_cur"]>0]["country"].tolist())
+        all_tgt_countries= sorted(cntry_base["country"].tolist())
+
+        # ── Target input form ────────────────────────────────────────────────
+        section_label("Set Targets per Country", "#2D4A3E")
+
+        # Store targets in session state — pre-load 2026 defaults on first run
+        tgt_key = f"country_targets_{cur_year}"
+        if tgt_key not in st.session_state:
+            if cur_year == 2026:
+                st.session_state[tgt_key] = {
+                    c: DEFAULT_TARGETS_2026.get(c, 0.0) for c in all_tgt_countries
+                }
+            else:
+                st.session_state[tgt_key] = {c: 0.0 for c in all_tgt_countries}
+
+        # Show pre-set targets banner for 2026
+        if cur_year == 2026:
+            set_countries = ", ".join(
+                f"{flag(c)} {c} <strong>{v:+.0f}%</strong>"
+                for c, v in DEFAULT_TARGETS_2026.items()
+                if c in all_tgt_countries
+            )
+            info_strip(
+                f"Pre-set 2026 targets (based on 2025 actuals): {set_countries}. "
+                f"You can override any value below.",
+                "#2D4A3E")
+
+        with st.form("target_form"):
+            st.markdown(
+                '<div style="font-family:Jost,sans-serif;font-size:.78rem;color:#4A4A4A;'
+                'margin-bottom:12px;">Enter a growth % target for each country. '
+                'Leave at 0 to exclude from tracking.</div>',
+                unsafe_allow_html=True)
+
+            n_cols = 4
+            country_chunks = [all_tgt_countries[i:i+n_cols] for i in range(0, len(all_tgt_countries), n_cols)]
+            new_targets = {}
+            for chunk in country_chunks:
+                cols = st.columns(n_cols)
+                for col, country in zip(cols, chunk):
+                    prev_val = safe_float(
+                        cntry_base[cntry_base["country"]==country]["fob_prev"].values[0]
+                        if country in cntry_base["country"].values else 0)
+                    default  = safe_float(st.session_state[tgt_key].get(country, 0.0))
+                    is_preset = cur_year == 2026 and country in DEFAULT_TARGETS_2026
+                    label = f"{flag(country)} {country}" + (" ✦" if is_preset else "") + f"\n(prev: $ {prev_val:,.0f})"
+                    val = col.number_input(
+                        label,
+                        min_value=-100.0, max_value=500.0,
+                        value=default, step=1.0,
+                        key=f"tgt_{cur_year}_{country}")
+                    new_targets[country] = val
+
+            submitted = st.form_submit_button("Save Targets  →", use_container_width=False)
+            if submitted:
+                st.session_state[tgt_key] = new_targets
+                st.success("Targets saved.")
+
+        targets = st.session_state.get(tgt_key, {c: DEFAULT_TARGETS_2026.get(c, 0.0) if cur_year==2026 else 0.0 for c in all_tgt_countries})
+
+        divider()
+        section_label(f"Target Dashboard  ·  {cur_year}", "#8C3D3D")
+
+        # Build results table
+        tgt_rows = []
+        for _, r in cntry_base.iterrows():
+            c        = r["country"]
+            fob_cur  = safe_float(r["fob_cur"])
+            fob_prev = safe_float(r["fob_prev"])
+            tgt_pct  = safe_float(targets.get(c, 0.0))
+            if tgt_pct == 0 and fob_prev == 0:
+                continue
+            tgt_fob  = fob_prev * (1 + tgt_pct/100) if fob_prev > 0 else 0.0
+            gap      = tgt_fob - fob_cur
+            pct_done = (fob_cur / tgt_fob * 100) if tgt_fob > 0 else (100.0 if fob_cur > 0 else 0.0)
+            # Expected pace: what fraction of year has passed
+            expected_pace = (current_week / (current_week if use_ytd else 52)) * tgt_fob
+            on_track = fob_cur >= expected_pace
+
+            tgt_rows.append({
+                "_country_raw":  c,
+                "_fob_cur":      fob_cur,
+                "_gap":          gap,
+                "_pct_done":     pct_done,
+                "_on_track":     on_track,
+                "Country":       f"{flag(c)} {c}",
+                f"FOB {py}":     f"$ {fob_prev:,.0f}" if fob_prev else "—",
+                "Target %":      f"{tgt_pct:+.1f}%",
+                "Target FOB":    f"$ {tgt_fob:,.0f}" if tgt_fob else "—",
+                f"FOB {cy}":     f"$ {fob_cur:,.0f}",
+                "% of Target":   f"{pct_done:.1f}%",
+                "Gap":           f"✓ ahead $ {abs(gap):,.0f}" if gap <= 0 else f"▼ $ {gap:,.0f}",
+                "Pace":          "✓ On track" if on_track else "⚠ Behind",
+            })
+
+        tgt_rows.sort(key=lambda x: x["_fob_cur"], reverse=True)
+        display_cols = ["Country", f"FOB {py}", "Target %", "Target FOB", f"FOB {cy}", "% of Target", "Gap", "Pace"]
+        st.dataframe(pd.DataFrame(tgt_rows)[display_cols], use_container_width=True, hide_index=True)
+
+        # Summary KPIs
+        divider()
+        on_track_n  = sum(1 for r in tgt_rows if r["_on_track"])
+        behind_n    = len(tgt_rows) - on_track_n
+        total_tgt   = sum(safe_float(r["_gap"]) for r in tgt_rows if r["_gap"] > 0)
+        total_ahead = sum(abs(safe_float(r["_gap"])) for r in tgt_rows if r["_gap"] <= 0)
+        s1,s2,s3,s4 = st.columns(4)
+        s1.metric("Countries tracked", f"{len(tgt_rows)}")
+        s2.metric("On track",          f"{on_track_n}", delta=f"{behind_n} behind")
+        s3.metric("Total gap to close", f"$ {total_tgt:,.0f}")
+        s4.metric("Total ahead",        f"$ {total_ahead:,.0f}")
+
+        divider()
+
+        # Per-country pace chart (cumulative FOB vs target pace line)
+        section_label("Cumulative Pace per Country", "#4A6080")
+        info_strip("Each chart shows the actual cumulative FOB week by week vs the linear target pace needed to hit the annual goal.", "#4A6080")
+
+        pace_countries = [r["_country_raw"] for r in tgt_rows if targets.get(r["_country_raw"], 0) != 0][:12]
+        if pace_countries and not prev_df.empty:
+            n_pace_cols = 2
+            pace_chunks = [pace_countries[i:i+n_pace_cols] for i in range(0, len(pace_countries), n_pace_cols)]
+            max_week_axis = current_week if use_ytd else 52
+
+            for chunk in pace_chunks:
+                cols = st.columns(n_pace_cols)
+                for col, country in zip(cols, chunk):
+                    row = cntry_base[cntry_base["country"]==country]
+                    if row.empty: continue
+                    fob_prev_c = safe_float(row["fob_prev"].values[0])
+                    tgt_pct_c  = safe_float(targets.get(country, 10.0))
+                    tgt_fob_c  = fob_prev_c * (1 + tgt_pct_c/100)
+
+                    # Actual weekly cumulative
+                    wk_c = cur_df[cur_df["country"]==country].groupby("delivery_week").agg(fob=("total_price","sum")).reset_index().sort_values("delivery_week")
+                    wk_c["cumulative"] = wk_c["fob"].cumsum()
+
+                    all_wks = list(range(1, max_week_axis+1))
+                    pace_line = [tgt_fob_c * (w / max_week_axis) for w in all_wks]
+
+                    fig_cp = go.Figure()
+                    fig_cp.add_trace(go.Scatter(
+                        x=wk_c["delivery_week"], y=wk_c["cumulative"],
+                        name="Actual", line=dict(color="#8C3D3D", width=2.5),
+                        mode="lines+markers", marker_size=4, fill="tozeroy",
+                        fillcolor="rgba(140,61,61,0.07)"))
+                    fig_cp.add_trace(go.Scatter(
+                        x=all_wks, y=pace_line,
+                        name=f"Target ({tgt_pct_c:+.0f}%)",
+                        line=dict(color="#2D4A3E", width=1.5, dash="dash"),
+                        mode="lines"))
+                    fig_cp.update_yaxes(tickprefix="$ ", tickfont=dict(size=9, color="#4A4A4A"), gridcolor="#F0EDE8")
+                    fig_cp.update_xaxes(title="Week", tickfont=dict(size=9, color="#4A4A4A"), gridcolor="#F0EDE8")
+                    fig_cp.update_layout(
+                        title=dict(text=f"{flag(country)} {country}", font=dict(family="Cormorant Garamond", size=14, color="#1A1A1A")),
+                        plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+                        font_family="Jost", margin=dict(l=0,r=0,t=32,b=0),
+                        height=220, showlegend=False)
+                    col.plotly_chart(fig_cp, use_container_width=True)
+        else:
+            st.info("Set targets above and ensure prior-year data is available to see pace charts.")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 3 — CUSTOMER INTELLIGENCE
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[2]:
+
+        # ── Concentration ────────────────────────────────────────────────────
+        section_label("Customer Concentration & Dependency Risk", "#8C3D3D")
+        info_strip(
+            "High concentration in few customers = high revenue risk. "
+            "A healthy portfolio spreads FOB across many accounts.", "#8C3D3D")
+
+        cust_fob = cur_df.groupby("customer_name").agg(
+            fob=("total_price","sum"), ships=("shipment_id","nunique"),
+            units=("total_quantity","sum"), countries=("country","nunique")).reset_index()
+        cust_fob = cust_fob.sort_values("fob", ascending=False).reset_index(drop=True)
+        total_fob_cur = safe_float(cust_fob["fob"].sum())
+        cust_fob["share_%"]      = cust_fob["fob"] / total_fob_cur * 100 if total_fob_cur else 0
+        cust_fob["cumulative_%"] = cust_fob["share_%"].cumsum()
+
+        top80 = int((cust_fob["cumulative_%"] <= 80).sum()) + 1
+        info_strip(
+            f"<strong>{top80} customer{'s' if top80!=1 else ''}</strong> account for 80% of current-year FOB. "
+            f"Total active customers: <strong>{len(cust_fob)}</strong>.", "#4A6080")
+
+        fig_conc = px.bar(
+            cust_fob.head(20), x="customer_name", y="fob",
+            labels={"customer_name":"Customer","fob":"FOB (USD)"},
+            color="share_%",
+            color_continuous_scale=["#F0EAE2","#8C3D3D"])
+        fig_conc.update_yaxes(tickprefix="$ ")
+        fig_conc.update_xaxes(tickangle=-35)
+        fig_conc.update_coloraxes(colorbar_title="Share %")
+        plotly_layout(fig_conc, height=320)
+        st.plotly_chart(fig_conc, use_container_width=True)
+
+        divider()
+
+        # ── Top growing / declining ──────────────────────────────────────────
+        section_label("Top Growing & Declining Customers", "#2D4A3E")
+        if not prev_df.empty:
+            cust_prev = prev_df.groupby("customer_name").agg(fob_prev=("total_price","sum")).reset_index()
+            cust_comp = cust_fob[["customer_name","fob"]].merge(cust_prev, on="customer_name", how="outer").fillna(0)
+            cust_comp["chg_pct"] = cust_comp.apply(lambda r: pct_change(r["fob"], r["fob_prev"]), axis=1)
+            cust_comp = cust_comp[cust_comp["fob"] > 0].dropna(subset=["chg_pct"])
+            cust_comp = cust_comp.sort_values("chg_pct", ascending=False)
+            top5 = cust_comp.head(5)
+            bot5 = cust_comp.tail(5).sort_values("chg_pct")
+
+            cg1, cg2 = st.columns(2)
+            def ranked_list(col, title, color, rows_df):
+                col.markdown(
+                    f'<div style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.14em;'
+                    f'text-transform:uppercase;color:{color};margin-bottom:10px;'
+                    f'border-bottom:2px solid {color};padding-bottom:6px;">{title}</div>',
+                    unsafe_allow_html=True)
+                for i, (_, r) in enumerate(rows_df.iterrows(), 1):
+                    col.markdown(
+                        f'<div style="display:flex;align-items:center;gap:10px;padding:9px 0;'
+                        f'border-bottom:1px solid #EDE9E3;">'
+                        f'<span style="font-family:Cormorant Garamond,serif;font-size:1.1rem;'
+                        f'font-weight:500;color:{color};min-width:20px;">{i}</span>'
+                        f'<span style="font-family:Jost,sans-serif;font-size:.84rem;color:#1A1A1A;flex:1;">'
+                        f'{r["customer_name"]}</span>'
+                        f'<div style="text-align:right;">'
+                        f'<div style="font-family:Jost,sans-serif;font-size:.82rem;font-weight:500;color:{color};">'
+                        f'{r["chg_pct"]:+.1f}%</div>'
+                        f'<div style="font-family:Jost,sans-serif;font-size:.72rem;color:#7A7A7A;">'
+                        f'$ {safe_float(r["fob"]):,.0f}</div>'
+                        f'</div></div>',
+                        unsafe_allow_html=True)
+            ranked_list(cg1, "Top 5 Growing",   "#2D4A3E", top5)
+            ranked_list(cg2, "Top 5 Declining", "#8C3D3D", bot5)
+        else:
+            st.info("Need prior-year data to show growth/decline rankings.")
+
+        divider()
+
+        # ── Weekly run-rate ──────────────────────────────────────────────────
+        section_label(f"Weekly Run-Rate  ·  {cur_year} vs {prev_year}", "#4A6080")
+        info_strip(
+            f"Compare each individual week this year against the same week last year — "
+            f"spot exactly which weeks are ahead or behind.", "#4A6080")
+
+        if not prev_df.empty:
+            wk_cur  = cur_df.groupby("delivery_week").agg(fob_cur=("total_price","sum")).reset_index()
+            wk_prev = prev_df.groupby("delivery_week").agg(fob_prev=("total_price","sum")).reset_index()
+            wk_rr   = wk_cur.merge(wk_prev, on="delivery_week", how="outer").fillna(0).sort_values("delivery_week")
+            wk_rr["diff"] = wk_rr["fob_cur"] - wk_rr["fob_prev"]
+
+            fig_rr = go.Figure()
+            fig_rr.add_bar(x=wk_rr["delivery_week"], y=wk_rr["fob_prev"],
+                           name=str(prev_year), marker_color="#DDD8D0")
+            fig_rr.add_bar(x=wk_rr["delivery_week"], y=wk_rr["fob_cur"],
+                           name=str(cur_year), marker_color="#8C3D3D",
+                           opacity=0.85)
+            fig_rr.update_layout(barmode="overlay")
+            fig_rr.update_yaxes(tickprefix="$ ")
+            fig_rr.update_xaxes(title="ISO Week")
+            plotly_layout(fig_rr, height=300)
+            st.plotly_chart(fig_rr, use_container_width=True)
+
+            # Difference table
+            wk_rr["Week"]       = wk_rr["delivery_week"].apply(lambda w: f"W{int(w)}")
+            wk_rr[f"FOB {cy}"]  = wk_rr["fob_cur"].apply(lambda x: f"$ {x:,.0f}")
+            wk_rr[f"FOB {py}"]  = wk_rr["fob_prev"].apply(lambda x: f"$ {x:,.0f}")
+            wk_rr["Difference"] = wk_rr["diff"].apply(
+                lambda x: f"▲ $ {abs(x):,.0f}" if x >= 0 else f"▼ $ {abs(x):,.0f}")
+            st.dataframe(
+                wk_rr[["Week", f"FOB {cy}", f"FOB {py}", "Difference"]],
+                use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No {prev_year} data available for run-rate comparison.")
+
+        divider()
+
+        # ── New customer tracking ────────────────────────────────────────────
+        section_label("New Customer Tracking", "#B8924A")
+        info_strip(
+            f"Customers with no activity in any prior year — tracked from their first order. "
+            f"Monitor their trajectory to assess retention potential.", "#B8924A")
+
+        all_prev_custs = dff[dff["delivery_year"] < cur_year]["customer_name"].unique()
+        new_custs_df   = cur_df[~cur_df["customer_name"].isin(all_prev_custs)]
+
+        if not new_custs_df.empty:
+            nc_grp = new_custs_df.groupby("customer_name").agg(
+                first_week=("delivery_week","min"),
+                last_week=("delivery_week","max"),
+                weeks_active=("delivery_week","nunique"),
+                fob=("total_price","sum"),
+                ships=("shipment_id","nunique"),
+                countries=("country", lambda x: ", ".join(f"{flag(c)} {c}" for c in sorted(x.unique())))).reset_index()
+            nc_grp = nc_grp.sort_values("fob", ascending=False)
+            nc_grp["FOB"]        = nc_grp["fob"].apply(lambda x: f"$ {x:,.0f}")
+            nc_grp["Avg FOB/wk"] = nc_grp.apply(
+                lambda r: f"$ {safe_float(r['fob'])/max(safe_int(r['weeks_active']),1):,.0f}", axis=1)
+
+            st.dataframe(
+                nc_grp[["customer_name","first_week","last_week","weeks_active",
+                        "ships","FOB","Avg FOB/wk","countries"]].rename(columns={
+                    "customer_name":"Customer","first_week":"First Week",
+                    "last_week":"Last Week","weeks_active":"Active Weeks",
+                    "ships":"Shipments","countries":"Countries"}),
+                use_container_width=True, hide_index=True)
+
+            # Trajectory sparklines — top 8 new customers
+            divider()
+            section_label(f"New Customer Weekly Trajectory  ·  {cur_year}", "#B8924A")
+            top_new = nc_grp.head(8)["customer_name"].tolist()
+            nc_wk   = new_custs_df[new_custs_df["customer_name"].isin(top_new)].groupby(
+                ["customer_name","delivery_week"]).agg(fob=("total_price","sum")).reset_index()
+
+            if not nc_wk.empty:
+                n_sp_cols = 4
+                sp_chunks = [top_new[i:i+n_sp_cols] for i in range(0, len(top_new), n_sp_cols)]
+                for chunk in sp_chunks:
+                    cols = st.columns(n_sp_cols)
+                    for col, cname in zip(cols, chunk):
+                        cd = nc_wk[nc_wk["customer_name"]==cname].sort_values("delivery_week")
+                        if cd.empty: continue
+                        ttl = safe_float(cd["fob"].sum())
+                        fig_sp = go.Figure()
+                        fig_sp.add_trace(go.Bar(
+                            x=cd["delivery_week"], y=cd["fob"],
+                            marker_color="#B8924A", opacity=0.85))
+                        fig_sp.update_layout(
+                            title=dict(text=f"{cname[:18]}<br><span style='font-size:10px;'>$ {ttl:,.0f}</span>",
+                                       font=dict(family="Jost", size=11, color="#1A1A1A")),
+                            plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+                            margin=dict(l=0,r=0,t=40,b=0), height=160, showlegend=False)
+                        fig_sp.update_yaxes(tickprefix="$ ", tickfont=dict(size=8), gridcolor="#F0EDE8", showgrid=True)
+                        fig_sp.update_xaxes(tickfont=dict(size=8), title="")
+                        col.plotly_chart(fig_sp, use_container_width=True)
+        else:
+            st.info(f"No new customers found in {cur_year} compared to prior years.")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 4 — SEASONALITY
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[3]:
+        section_label(f"Seasonality Heatmap  ·  FOB by Country & Week  ·  {cur_year}", "#4A6080")
+        info_strip(
+            "Which weeks are your strongest per market? "
+            "Use this to plan commercial push timing, inventory, and staffing.", "#4A6080")
+
+        season = cur_df.groupby(["country","delivery_week"]).agg(fob=("total_price","sum")).reset_index()
+        if not season.empty:
+            heat_piv = season.pivot_table(
+                index="country", columns="delivery_week", values="fob", aggfunc="sum").fillna(0)
+            top_countries_s = heat_piv.sum(axis=1).nlargest(15).index
+            heat_piv = heat_piv.loc[top_countries_s]
+            heat_piv.index = [f"{flag(c)} {c}" for c in heat_piv.index]
+
+            fig_sea = go.Figure(data=go.Heatmap(
+                z=heat_piv.values,
+                x=[f"W{int(w)}" for w in heat_piv.columns],
+                y=heat_piv.index.tolist(),
+                colorscale=[[0,"#F5F2ED"],[0.25,"#F0EAE2"],[0.6,"#C47A7A"],[1,"#5C1F1F"]],
+                hoverongaps=False,
+                hovertemplate="Country: %{y}<br>Week: %{x}<br>FOB: $ %{z:,.0f}<extra></extra>",
+            ))
+            fig_sea.update_layout(
+                plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+                font_family="Jost", font_color="#1A1A1A",
+                margin=dict(l=0,r=0,t=16,b=0),
+                height=max(320, len(top_countries_s)*34),
+                xaxis=dict(side="top", tickfont=dict(size=10, color="#4A4A4A")),
+                yaxis=dict(tickfont=dict(size=11, color="#1A1A1A")),
+            )
+            st.plotly_chart(fig_sea, use_container_width=True)
+
+        divider()
+        section_label(f"Strongest Weeks Overall  ·  {cur_year}")
+        wk_total = cur_df.groupby("delivery_week").agg(
+            fob=("total_price","sum"),
+            ships=("shipment_id","nunique"),
+            customers=("customer_name","nunique")).reset_index()
+        wk_total = wk_total.sort_values("fob", ascending=False).head(10)
+        wk_total["Week"]      = wk_total["delivery_week"].apply(lambda w: week_label(cur_year, int(w)))
+        wk_total["FOB"]       = wk_total["fob"].apply(lambda x: f"$ {x:,.0f}")
+        wk_total["Shipments"] = wk_total["ships"]
+        wk_total["Customers"] = wk_total["customers"]
+        st.dataframe(wk_total[["Week","FOB","Shipments","Customers"]],
+                     use_container_width=True, hide_index=True)
+
+        if not prev_df.empty:
+            divider()
+            section_label(f"Same-Week Comparison  ·  {cur_year} vs {prev_year}")
+            wk_cp = cur_df.groupby("delivery_week").agg(fob_cur=("total_price","sum")).reset_index()
+            wk_pp = prev_df.groupby("delivery_week").agg(fob_prev=("total_price","sum")).reset_index()
+            wk_mrg= wk_cp.merge(wk_pp, on="delivery_week", how="outer").fillna(0).sort_values("delivery_week")
+
+            fig_wk = go.Figure()
+            fig_wk.add_trace(go.Scatter(
+                x=wk_mrg["delivery_week"], y=wk_mrg["fob_prev"],
+                name=str(prev_year), line=dict(color="#DDD8D0", width=2), mode="lines"))
+            fig_wk.add_trace(go.Scatter(
+                x=wk_mrg["delivery_week"], y=wk_mrg["fob_cur"],
+                name=str(cur_year), line=dict(color="#8C3D3D", width=2.5),
+                mode="lines+markers", marker_size=4))
+            fig_wk.update_yaxes(tickprefix="$ ")
+            fig_wk.update_xaxes(title="ISO Week")
+            plotly_layout(fig_wk, height=300)
+            st.plotly_chart(fig_wk, use_container_width=True)
+
+            divider()
+            section_label(f"Country Seasonality Shift  ·  {cur_year} vs {prev_year}")
+            info_strip("Which countries changed their active season? Darker cells = higher FOB that week.", "#4A6080")
+
+            prev_heat = prev_df.groupby(["country","delivery_week"]).agg(fob=("total_price","sum")).reset_index()
+            if not prev_heat.empty:
+                ph_piv = prev_heat.pivot_table(
+                    index="country", columns="delivery_week", values="fob", aggfunc="sum").fillna(0)
+                common_c = [c for c in heat_piv.index if c.split(" ",1)[-1] in ph_piv.index] if not season.empty else []
+
+                if common_c and not season.empty:
+                    # Build shift: current - previous (normalised)
+                    cur_norm  = heat_piv.loc[common_c] if common_c else heat_piv
+                    prev_sub  = ph_piv.loc[[c.split(" ",1)[-1] for c in common_c if c.split(" ",1)[-1] in ph_piv.index]]
+                    if not prev_sub.empty:
+                        prev_sub.index = [f"{flag(c)} {c}" for c in prev_sub.index]
+                        common_weeks = sorted(set(cur_norm.columns) & set(prev_sub.columns))
+                        shift_df = cur_norm[common_weeks] - prev_sub[common_weeks]
+
+                        fig_shift = go.Figure(data=go.Heatmap(
+                            z=shift_df.values,
+                            x=[f"W{int(w)}" for w in shift_df.columns],
+                            y=shift_df.index.tolist(),
+                            colorscale=[
+                                [0,"#8C3D3D"],[0.35,"#F0EAE2"],
+                                [0.5,"#F5F2ED"],[0.65,"#C8DDD0"],[1,"#2D4A3E"]],
+                            zmid=0,
+                            hoverongaps=False,
+                            hovertemplate="Country: %{y}<br>Week: %{x}<br>Δ FOB: $ %{z:,.0f}<extra></extra>",
+                        ))
+                        fig_shift.update_layout(
+                            plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+                            font_family="Jost", font_color="#1A1A1A",
+                            margin=dict(l=0,r=0,t=16,b=0),
+                            height=max(280, len(shift_df)*34),
+                            xaxis=dict(side="top", tickfont=dict(size=10, color="#4A4A4A")),
+                            yaxis=dict(tickfont=dict(size=11, color="#1A1A1A")),
+                        )
+                        st.markdown(
+                            '<div style="font-family:Jost,sans-serif;font-size:.72rem;color:#7A7A7A;'
+                            'margin-bottom:8px;">Green = more FOB this year vs last year in that week  ·  '
+                            'Red = less FOB  ·  White = no change</div>',
+                            unsafe_allow_html=True)
+                        st.plotly_chart(fig_shift, use_container_width=True)
+
+    return  # end render_commercialimport streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, date
 import io
+import hashlib
 import streamlit.components.v1 as components
 
 st.set_page_config(
@@ -11,6 +713,220 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ════════════════════════════════════════════════════════════════════════════
+# AUTH — multi-user, works on Streamlit Cloud, self-hosted, and local
+# ════════════════════════════════════════════════════════════════════════════
+import json, os, pathlib
+
+def hash_pw(pw: str) -> str:
+    return hashlib.sha256(pw.strip().encode()).hexdigest()
+
+# ── User store: secrets (cloud) → local JSON file → in-memory fallback ───────
+USERS_FILE = pathlib.Path(".streamlit/users.json")
+
+def _load_users() -> dict:
+    """
+    Priority:
+    1. st.secrets["users"] — Streamlit Cloud / secrets.toml
+    2. .streamlit/users.json — self-hosted / local persistent file
+    3. st.session_state["_users_mem"] — in-memory fallback (resets on restart)
+    Returns dict: {username_lower: {"hash": ..., "display": ..., "role": ...}}
+    """
+    # 1 — Streamlit secrets
+    try:
+        raw = st.secrets["users"]
+        # Support both flat {user: hash} and rich {user: {hash, display, role}}
+        out = {}
+        for u, v in raw.items():
+            u = u.lower()
+            if isinstance(v, str):
+                out[u] = {"hash": v, "display": u.title(), "role": "user"}
+            else:
+                out[u] = {
+                    "hash":    v.get("hash", ""),
+                    "display": v.get("display", u.title()),
+                    "role":    v.get("role", "user"),
+                }
+        if out:
+            return out
+    except Exception:
+        pass
+
+    # 2 — Local JSON file
+    if USERS_FILE.exists():
+        try:
+            return json.loads(USERS_FILE.read_text())
+        except Exception:
+            pass
+
+    # 3 — In-memory (seeded with default admin on first run)
+    if "_users_mem" not in st.session_state:
+        st.session_state["_users_mem"] = {
+            "admin": {
+                "hash":    hash_pw("admin123"),
+                "display": "Administrator",
+                "role":    "admin",
+            }
+        }
+    return st.session_state["_users_mem"]
+
+def _save_users(users: dict):
+    """Persist to file if possible; otherwise keep in memory."""
+    st.session_state["_users_mem"] = users
+    try:
+        USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        USERS_FILE.write_text(json.dumps(users, indent=2))
+    except Exception:
+        pass  # read-only filesystem (Streamlit Cloud) — memory only
+
+def check_credentials(username: str, password: str) -> bool:
+    users = _load_users()
+    u = username.strip().lower()
+    if u not in users:
+        return False
+    return users[u]["hash"] == hash_pw(password)
+
+def get_user(username: str) -> dict:
+    users = _load_users()
+    return users.get(username.strip().lower(),
+                     {"display": username.title(), "role": "user"})
+
+# ── Login screen ──────────────────────────────────────────────────────────────
+def render_login():
+    components.html("""<style>
+    html,body,[data-testid="stAppViewContainer"],[data-testid="stMain"],
+    [data-testid="stMainBlockContainer"],.block-container{
+      background-color:#F5F2ED!important;}
+    </style>""", height=0)
+
+    st.markdown("""
+    <div style="text-align:center;padding:70px 0 36px 0;">
+      <div style="font-family:'Cormorant Garamond',serif;font-size:2.8rem;font-weight:400;
+                  color:#1A1A1A;letter-spacing:.02em;line-height:1.2;">✦ Export Ops</div>
+      <div style="font-family:'Jost',sans-serif;font-size:.65rem;letter-spacing:.22em;
+                  text-transform:uppercase;color:#7A7A7A;margin-top:6px;">Management Suite</div>
+    </div>""", unsafe_allow_html=True)
+
+    _, card, _ = st.columns([1, 3, 1])
+    with card:
+        st.markdown("""
+        <div style="background:#FFFFFF;border:1px solid #DDD8D0;border-top:3px solid #8C3D3D;
+                    padding:36px 32px 8px 32px;margin-bottom:0;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;
+                      font-weight:500;color:#1A1A1A;margin-bottom:4px;">Sign in</div>
+          <div style="font-family:'Jost',sans-serif;font-size:.78rem;color:#7A7A7A;
+                      margin-bottom:20px;">Enter your credentials to continue</div>
+        </div>""", unsafe_allow_html=True)
+
+        with st.container():
+            st.markdown('<div style="background:#FFFFFF;border:1px solid #DDD8D0;border-top:none;padding:0 32px 28px 32px;">', unsafe_allow_html=True)
+            username = st.text_input("Username", placeholder="username", key="login_user")
+            password = st.text_input("Password", placeholder="••••••••", type="password", key="login_pw")
+
+            if st.session_state.get("login_failed"):
+                st.markdown("""
+                <div style="font-family:'Jost',sans-serif;font-size:.78rem;color:#8C3D3D;
+                            padding:10px 14px;background:#FFF5F5;border-left:3px solid #8C3D3D;
+                            margin-bottom:12px;">
+                  Incorrect username or password.
+                </div>""", unsafe_allow_html=True)
+
+            if st.button("Sign In  →", use_container_width=True, key="login_btn"):
+                if check_credentials(username, password):
+                    st.session_state.update({
+                        "authenticated": True,
+                        "username":      username.strip().lower(),
+                        "login_failed":  False,
+                    })
+                    st.rerun()
+                else:
+                    st.session_state["login_failed"] = True
+                    st.rerun()
+
+            st.markdown("""
+            <div style="font-family:'Jost',sans-serif;font-size:.70rem;color:#9A9A9A;
+                        text-align:center;margin-top:18px;line-height:1.7;">
+              Access restricted to authorised personnel.
+            </div>""", unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+# ── Admin panel ───────────────────────────────────────────────────────────────
+def render_admin():
+    page_header("User Management", "Add · Edit · Remove Users")
+    users = _load_users()
+
+    # ── Current users table ───────────────────────────────────────────────────
+    section_label("Current Users", "#8C3D3D")
+    rows = [{"Username": u,
+             "Display Name": v["display"],
+             "Role": v["role"]}
+            for u, v in users.items()]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    divider()
+
+    # ── Add / edit user ───────────────────────────────────────────────────────
+    section_label("Add or Update User", "#2D4A3E")
+    col1, col2, col3, col4 = st.columns(4)
+    new_user    = col1.text_input("Username",     key="adm_user",    placeholder="e.g. maria")
+    new_display = col2.text_input("Display Name", key="adm_display", placeholder="e.g. María García")
+    new_pw      = col3.text_input("Password",     key="adm_pw",      type="password", placeholder="New password")
+    new_role    = col4.selectbox("Role",          ["user", "admin"],  key="adm_role")
+
+    if st.button("Save User", key="adm_save"):
+        u = new_user.strip().lower()
+        if not u:
+            st.warning("Username cannot be empty.")
+        elif not new_pw and u not in users:
+            st.warning("Password required for new users.")
+        else:
+            users[u] = {
+                "hash":    hash_pw(new_pw) if new_pw else users.get(u, {}).get("hash", ""),
+                "display": new_display.strip() or u.title(),
+                "role":    new_role,
+            }
+            _save_users(users)
+            st.success(f"User **{u}** saved.")
+            st.rerun()
+
+    divider()
+
+    # ── Delete user ───────────────────────────────────────────────────────────
+    section_label("Remove User", "#B8924A")
+    del_user = st.selectbox("Select user to remove",
+                            [u for u in users if u != st.session_state.get("username")],
+                            key="adm_del")
+    if st.button("Remove User", key="adm_del_btn"):
+        if del_user in users:
+            del users[del_user]
+            _save_users(users)
+            st.success(f"User **{del_user}** removed.")
+            st.rerun()
+
+    divider()
+
+    # ── Change own password ───────────────────────────────────────────────────
+    section_label("Change My Password", "#4A6080")
+    cp1, cp2 = st.columns(2)
+    cur_pw  = cp1.text_input("Current password", type="password", key="cp_cur")
+    new_pw2 = cp2.text_input("New password",     type="password", key="cp_new")
+    if st.button("Update Password", key="cp_btn"):
+        me = st.session_state.get("username", "")
+        if not check_credentials(me, cur_pw):
+            st.error("Current password is incorrect.")
+        elif len(new_pw2) < 6:
+            st.warning("New password must be at least 6 characters.")
+        else:
+            users[me]["hash"] = hash_pw(new_pw2)
+            _save_users(users)
+            st.success("Password updated successfully.")
+
+# ── Auth gate ─────────────────────────────────────────────────────────────────
+if not st.session_state.get("authenticated", False):
+    render_login()
+    st.stop()
+
 
 # ── Force light theme via config ─────────────────────────────────────────────
 # Inject into .streamlit/config.toml equivalent via query params trick
@@ -528,6 +1444,658 @@ def render_commercial(df):
     years_avail   = sorted(df["delivery_year"].dropna().astype(int).unique())
     all_customers = sorted(df["customer_name"].dropna().unique())
     all_countries = sorted(c for c in df["country"].dropna().unique() if c not in EXCLUDED_COUNTRIES)
+
+    page_header("Commercial Intelligence",
+                "Year-over-Year Performance  ·  Growth Analysis  ·  Market Focus")
+
+    ci_tabs = st.tabs([
+        "📊  Overview & YoY",
+        "🎯  Growth Targets",
+        "👥  Customer Intelligence",
+        "🌱  Product Mix",
+        "📅  Seasonality",
+        "🔗  Origin Mix",
+    ])
+
+    # ── Shared filters (above tabs) ───────────────────────────────────────────
+    today_iso    = date.today().isocalendar()
+    current_week = today_iso[1]
+
+    with st.expander("⚙  Filters & Scope", expanded=True):
+        scope_col, note_col = st.columns([1, 2])
+        with scope_col:
+            scope = st.radio("Scope", ["📅  Year-to-Date", "📆  Full Year"], key="ci_scope")
+        use_ytd = "Year-to-Date" in scope
+        with note_col:
+            if use_ytd:
+                info_strip(f"Comparing <strong>Week 1 – Week {current_week}</strong> across all years. Prior years capped at week {current_week}.", "#2D4A3E")
+            else:
+                info_strip("Comparing <strong>all weeks in the system</strong> per year — including future confirmed orders.", "#B8924A")
+
+        fc1, fc2, fc3 = st.columns(3)
+        default_years = years_avail[-3:] if len(years_avail) >= 3 else years_avail
+        sel_years     = fc1.multiselect("Years", years_avail, default=default_years, key="ci_years")
+        sel_customers = fc2.multiselect("Customers", all_customers, default=[], key="ci_customers", placeholder="All customers")
+        sel_countries = fc3.multiselect("Countries", all_countries, default=[], key="ci_countries", placeholder="All countries")
+
+    if not sel_years:
+        st.warning("Select at least one year.")
+        return
+
+    dff = df[df["delivery_year"].isin(sel_years)].copy()
+    dff = dff[~dff["country"].isin(EXCLUDED_COUNTRIES)]
+    if sel_customers: dff = dff[dff["customer_name"].isin(sel_customers)]
+    if sel_countries: dff = dff[dff["country"].isin(sel_countries)]
+    if use_ytd:       dff = dff[dff["delivery_week"] <= current_week]
+
+    if dff.empty:
+        st.info("No data matches the selected filters.")
+        return
+
+    cur_year   = max(sel_years)
+    prev_year  = cur_year - 1
+    prev2_year = cur_year - 2
+    cy, py, p2y = str(cur_year), str(prev_year), str(prev2_year)
+    scope_lbl = f"YTD W1–W{current_week}" if use_ytd else "Full Year"
+
+    cur_df   = dff[dff["delivery_year"]==cur_year]
+    prev_df  = dff[dff["delivery_year"]==prev_year]  if prev_year  in dff["delivery_year"].values else pd.DataFrame()
+    prev2_df = dff[dff["delivery_year"]==prev2_year] if prev2_year in dff["delivery_year"].values else pd.DataFrame()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 1 — OVERVIEW & YOY
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[0]:
+        section_label(f"Summary  ·  {scope_lbl}  ·  {cur_year} vs {prev_year}")
+
+        cur_ship  = n_shipments(cur_df)
+        prev_ship = n_shipments(prev_df)
+        cur_fob   = safe_float(cur_df["total_price"].sum())
+        prev_fob  = safe_float(prev_df["total_price"].sum()) if not prev_df.empty else 0.0
+        cur_units = safe_float(cur_df["total_quantity"].sum())
+        prev_units= safe_float(prev_df["total_quantity"].sum()) if not prev_df.empty else 0.0
+
+        k1,k2,k3,k4 = st.columns(4)
+        k1.metric("Shipments",        f"{cur_ship:,}",        delta=metric_delta_str(cur_ship,  prev_ship))
+        k2.metric("FOB Value",        f"$ {cur_fob:,.0f}",    delta=metric_delta_str(cur_fob,   prev_fob))
+        k3.metric("Units Shipped",    f"{int(cur_units):,}",  delta=metric_delta_str(cur_units, prev_units))
+        k4.metric("Active Customers", f"{cur_df['customer_name'].nunique():,}")
+
+        divider()
+        section_label(f"Weekly FOB Trend  ·  {scope_lbl}")
+        weekly = dff.groupby(["delivery_year","delivery_week"]).agg(fob=("total_price","sum")).reset_index()
+        weekly["Year"] = weekly["delivery_year"].astype(str)
+        fig_trend = px.line(weekly, x="delivery_week", y="fob", color="Year",
+                            labels={"delivery_week":"ISO Week","fob":"FOB (USD)"},
+                            color_discrete_sequence=PALETTE, markers=True)
+        fig_trend.update_traces(line_width=2.5, marker_size=5)
+        fig_trend.update_yaxes(tickprefix="$ ")
+        plotly_layout(fig_trend, height=320)
+        st.plotly_chart(fig_trend, use_container_width=True)
+
+        divider()
+        section_label(f"FOB by Country  ·  3-Year Comparison")
+        cy_grp = dff.groupby(["country","delivery_year"]).agg(fob=("total_price","sum"), ships=("shipment_id","nunique")).reset_index()
+        cy_grp["Year"]  = cy_grp["delivery_year"].astype(str)
+        cy_grp["label"] = cy_grp["country"].apply(lambda c: f"{flag(c)} {c}")
+        order = cy_grp[cy_grp["Year"]==cy].sort_values("fob", ascending=False)["country"].tolist()
+        cy_grp["sort_key"] = cy_grp["country"].apply(lambda c: order.index(c) if c in order else 999)
+        cy_grp = cy_grp.sort_values("sort_key")
+        fig_cntry = px.bar(cy_grp, x="label", y="fob", color="Year", barmode="group",
+                           labels={"label":"Country","fob":"FOB (USD)"},
+                           color_discrete_sequence=PALETTE)
+        fig_cntry.update_yaxes(tickprefix="$ ")
+        fig_cntry.update_xaxes(tickangle=-35)
+        plotly_layout(fig_cntry, height=360)
+        st.plotly_chart(fig_cntry, use_container_width=True)
+
+        divider()
+        section_label(f"Country Status Table  ·  {scope_lbl}")
+        piv_fob = cy_grp.pivot_table(index="country", columns="Year", values="fob",   aggfunc="sum").reset_index()
+        piv_shp = cy_grp.pivot_table(index="country", columns="Year", values="ships", aggfunc="sum").reset_index()
+        country_rows = []
+        for c in piv_fob["country"].unique():
+            c_fob  = safe_float(safe_pivot_val(piv_fob,"country",c,cy))
+            p_fob  = safe_float(safe_pivot_val(piv_fob,"country",c,py))
+            p2_fob = safe_float(safe_pivot_val(piv_fob,"country",c,p2y))
+            c_shp  = safe_int(safe_pivot_val(piv_shp,"country",c,cy))
+            p_shp  = safe_int(safe_pivot_val(piv_shp,"country",c,py))
+            p2_shp = safe_int(safe_pivot_val(piv_shp,"country",c,p2y))
+            chg_py = pct_change(c_fob,p_fob)
+            chg_p2 = pct_change(c_fob,p2_fob)
+            badge  = status_badge(chg_py,c_fob)
+            country_rows.append({
+                "Country":     f"{flag(c)} {c}",
+                f"Ships {cy}": c_shp, f"Ships {py}": p_shp or "—", f"Ships {p2y}": p2_shp or "—",
+                f"FOB {cy}":   f"$ {c_fob:,.0f}",
+                f"FOB {py}":   f"$ {p_fob:,.0f}"  if p_fob  else "—",
+                f"FOB {p2y}":  f"$ {p2_fob:,.0f}" if p2_fob else "—",
+                f"vs {py}":    f"{chg_py:+.1f}%"   if chg_py is not None else "—",
+                f"vs {p2y}":   f"{chg_p2:+.1f}%"   if chg_p2 is not None else "—",
+                "Status":      badge,
+            })
+        country_rows.sort(key=lambda x: safe_float(str(x[f"FOB {cy}"]).replace("$","").replace(",","")), reverse=True)
+        st.dataframe(pd.DataFrame(country_rows), use_container_width=True, hide_index=True)
+
+        divider()
+        section_label(f"Customer Performance by Country  ·  {scope_lbl}")
+        info_strip("Each country panel shows every customer active in any selected year. Status compares current-year FOB vs prior year.", "#8C3D3D")
+        ccy = dff.groupby(["country","customer_name","delivery_year"]).agg(
+            fob=("total_price","sum"), ships=("shipment_id","nunique"), units=("total_quantity","sum")).reset_index()
+        top_cntry = ccy[ccy["delivery_year"]==cur_year].groupby("country")["fob"].sum().sort_values(ascending=False).index.tolist()
+        for country in top_cntry + [c for c in ccy["country"].unique() if c not in top_cntry]:
+            cdf_c = ccy[ccy["country"]==country]
+            if cdf_c.empty: continue
+            tot_fob = safe_float(cdf_c[cdf_c["delivery_year"]==cur_year]["fob"].sum())
+            tot_shp = safe_int(cdf_c[cdf_c["delivery_year"]==cur_year]["ships"].sum())
+            with st.expander(f"{flag(country)}  {country}   ·   {tot_shp} shipments   ·   $ {tot_fob:,.0f}  ({scope_lbl} {cur_year})", expanded=False):
+                piv_c_fob  = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="fob",   aggfunc="sum").reset_index()
+                piv_c_shp  = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="ships", aggfunc="sum").reset_index()
+                piv_c_unit = cdf_c.pivot_table(index="customer_name", columns="delivery_year", values="units", aggfunc="sum").reset_index()
+                cust_rows = []
+                for _, r in piv_c_fob.iterrows():
+                    cname  = r["customer_name"]
+                    cf     = safe_float(r.get(cur_year,   0))
+                    pf     = safe_float(r.get(prev_year,  0))
+                    p2f    = safe_float(r.get(prev2_year, 0))
+                    cs     = safe_int(safe_pivot_val(piv_c_shp,  "customer_name", cname, cur_year))
+                    ps     = safe_int(safe_pivot_val(piv_c_shp,  "customer_name", cname, prev_year))
+                    cu     = safe_int(safe_pivot_val(piv_c_unit, "customer_name", cname, cur_year))
+                    chg    = pct_change(cf, pf)
+                    chg2   = pct_change(cf, p2f)
+                    cbadge = status_badge(chg, cf)
+                    cust_rows.append({
+                        "Customer": cname, f"FOB {cy}": f"$ {cf:,.0f}",
+                        f"FOB {py}": f"$ {pf:,.0f}" if pf else "—",
+                        f"FOB {p2y}": f"$ {p2f:,.0f}" if p2f else "—",
+                        f"vs {py}": f"{chg:+.1f}%" if chg is not None else "—",
+                        f"vs {p2y}": f"{chg2:+.1f}%" if chg2 is not None else "—",
+                        f"Ships {cy}": cs, f"Ships {py}": ps or "—",
+                        f"Units {cy}": f"{cu:,}", "Status": cbadge,
+                    })
+                cust_rows.sort(key=lambda x: safe_float(str(x[f"FOB {cy}"]).replace("$","").replace(",","")), reverse=True)
+                if cust_rows:
+                    st.dataframe(pd.DataFrame(cust_rows), use_container_width=True, hide_index=True)
+                    cdf_cur = cdf_c[cdf_c["delivery_year"]==cur_year].sort_values("fob", ascending=False).head(12)
+                    if not cdf_cur.empty:
+                        fig_mini = px.bar(cdf_cur, x="customer_name", y="fob",
+                                          labels={"customer_name":"","fob":"FOB (USD)"},
+                                          color_discrete_sequence=["#8C3D3D"])
+                        fig_mini.update_yaxes(tickprefix="$ ")
+                        fig_mini.update_xaxes(tickangle=-30)
+                        plotly_layout(fig_mini, height=200)
+                        st.plotly_chart(fig_mini, use_container_width=True)
+
+        divider()
+        section_label("Growth Opportunity Focus")
+        decline = [r for r in country_rows if any(k in r["Status"] for k in ["Declining","At risk","Lost"])]
+        growing = [r for r in country_rows if any(k in r["Status"] for k in ["Growing","Strong"])]
+        new_mkt = [r for r in country_rows if "New" in r["Status"]]
+        g1,g2,g3 = st.columns(3)
+        def focus_col(col, title, color, items):
+            col.markdown(f'<div style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.16em;text-transform:uppercase;color:{color};margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid {color};">{title}</div>', unsafe_allow_html=True)
+            if not items:
+                col.markdown('<div style="font-family:Jost,sans-serif;font-size:.82rem;color:#7A7A7A;padding:6px 0;">None</div>', unsafe_allow_html=True)
+            for r in items:
+                chg = r.get(f"vs {py}","—")
+                col.markdown(f'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #EDE9E3;"><span style="font-family:Jost,sans-serif;font-size:.82rem;color:#1A1A1A;">{r["Country"]}</span><span style="font-family:Jost,sans-serif;font-size:.75rem;font-weight:500;color:{color};">{chg}</span></div>', unsafe_allow_html=True)
+        focus_col(g1,"Needs attention","#8C3D3D",decline)
+        focus_col(g2,"Growing markets","#2D4A3E",growing)
+        focus_col(g3,"New markets","#B8924A",new_mkt)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 2 — GROWTH TARGETS
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[1]:
+        section_label(f"Growth Targets  ·  {cur_year}  ·  {scope_lbl}", "#8C3D3D")
+        info_strip("Set a target FOB growth % for the current year. The dashboard calculates where you need to be each week to hit it and shows your current gap.", "#2D4A3E")
+
+        tg1, tg2 = st.columns([1, 3])
+        target_pct = tg1.number_input("Global FOB growth target (%)", min_value=0.0, max_value=200.0, value=10.0, step=0.5, key="target_pct")
+        target_fob = prev_fob * (1 + target_pct / 100) if prev_fob > 0 else 0.0
+
+        if target_fob > 0:
+            gap       = target_fob - cur_fob
+            pace_pct  = (cur_fob / target_fob * 100) if target_fob else 0
+            on_track  = cur_fob >= (prev_fob * (1 + target_pct/100) * (current_week / 52))
+
+            with tg2:
+                info_strip(
+                    f"Target FOB for {cur_year}: <strong>$ {target_fob:,.0f}</strong>  "
+                    f"({target_pct:+.1f}% vs {prev_year})<br>"
+                    f"Current FOB: <strong>$ {cur_fob:,.0f}</strong>  ·  "
+                    f"Gap to target: <strong style='color:{'#2D4A3E' if gap<=0 else '#8C3D3D'};'>"
+                    f"{'$ {:,.0f} ahead'.format(-gap) if gap<=0 else '$ {:,.0f} behind'.format(gap)}</strong>",
+                    "#2D4A3E" if gap <= 0 else "#8C3D3D")
+
+            k1,k2,k3,k4 = st.columns(4)
+            k1.metric("Target FOB",     f"$ {target_fob:,.0f}")
+            k2.metric("Achieved",       f"$ {cur_fob:,.0f}",  delta=f"{pace_pct-100:+.1f}% of target")
+            k3.metric("Gap",            f"$ {abs(gap):,.0f}",  delta="ahead" if gap<=0 else "behind")
+            k4.metric("Pace",           f"{'On track ✓' if on_track else 'Behind pace'}")
+
+            divider()
+
+            # Weekly pace chart — actual vs required pace line
+            section_label("Weekly Pace  ·  Actual vs Required")
+            wk_actual = dff[dff["delivery_year"].isin([cur_year, prev_year])].groupby(
+                ["delivery_year","delivery_week"]).agg(fob=("total_price","sum")).reset_index()
+
+            cur_wk  = wk_actual[wk_actual["delivery_year"]==cur_year].sort_values("delivery_week")
+            prev_wk = wk_actual[wk_actual["delivery_year"]==prev_year].sort_values("delivery_week") if prev_year in wk_actual["delivery_year"].values else pd.DataFrame()
+
+            cur_wk  = cur_wk.copy();  cur_wk["cumulative"]  = cur_wk["fob"].cumsum()
+            if not prev_wk.empty:
+                prev_wk = prev_wk.copy(); prev_wk["cumulative"] = prev_wk["fob"].cumsum()
+
+            all_weeks = list(range(1, (current_week if use_ytd else 53)))
+            target_line = [target_fob * (w / (current_week if use_ytd else 52)) for w in all_weeks]
+
+            fig_pace = go.Figure()
+            fig_pace.add_trace(go.Scatter(
+                x=cur_wk["delivery_week"], y=cur_wk["cumulative"],
+                name=f"{cur_year} Actual", line=dict(color="#8C3D3D", width=2.5), mode="lines+markers", marker_size=4))
+            if not prev_wk.empty:
+                fig_pace.add_trace(go.Scatter(
+                    x=prev_wk["delivery_week"], y=prev_wk["cumulative"],
+                    name=f"{prev_year} Actual", line=dict(color="#B8924A", width=1.5, dash="dot"), mode="lines"))
+            fig_pace.add_trace(go.Scatter(
+                x=all_weeks, y=target_line,
+                name=f"Target pace ({target_pct:+.0f}%)",
+                line=dict(color="#2D4A3E", width=1.5, dash="dash"), mode="lines"))
+            fig_pace.update_yaxes(tickprefix="$ ")
+            fig_pace.update_xaxes(title="ISO Week")
+            plotly_layout(fig_pace, height=340)
+            st.plotly_chart(fig_pace, use_container_width=True)
+
+            divider()
+
+            # Country-level target tracking
+            section_label("Country-Level Target Tracking")
+            cntry_cur  = cur_df.groupby("country").agg(fob_cur=("total_price","sum")).reset_index()
+            cntry_prev = prev_df.groupby("country").agg(fob_prev=("total_price","sum")).reset_index() if not prev_df.empty else pd.DataFrame(columns=["country","fob_prev"])
+            cntry_tgt  = cntry_cur.merge(cntry_prev, on="country", how="outer").fillna(0)
+            cntry_tgt["target"]   = cntry_tgt["fob_prev"] * (1 + target_pct/100)
+            cntry_tgt["gap"]      = cntry_tgt["target"] - cntry_tgt["fob_cur"]
+            cntry_tgt["pct_done"] = np.where(cntry_tgt["target"]>0, cntry_tgt["fob_cur"]/cntry_tgt["target"]*100, 0)
+            cntry_tgt["Country"]  = cntry_tgt["country"].apply(lambda c: f"{flag(c)} {c}")
+            cntry_tgt = cntry_tgt.sort_values("fob_cur", ascending=False)
+
+            tgt_rows = []
+            for _, r in cntry_tgt.iterrows():
+                tgt_rows.append({
+                    "Country":          r["Country"],
+                    f"FOB {cy}":        f"$ {safe_float(r['fob_cur']):,.0f}",
+                    f"FOB {py}":        f"$ {safe_float(r['fob_prev']):,.0f}" if safe_float(r['fob_prev']) else "—",
+                    f"Target ({target_pct:+.0f}%)": f"$ {safe_float(r['target']):,.0f}" if safe_float(r['target']) else "—",
+                    "Gap":              f"$ {safe_float(r['gap']):,.0f}" if safe_float(r['gap'])>0 else f"✓ $ {abs(safe_float(r['gap'])):,.0f} ahead",
+                    "% of Target":      f"{safe_float(r['pct_done']):.1f}%",
+                })
+            st.dataframe(pd.DataFrame(tgt_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No data for {prev_year} — targets require at least one prior year of data.")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 3 — CUSTOMER INTELLIGENCE
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[2]:
+        section_label("Customer Concentration & Dependency Risk", "#8C3D3D")
+        info_strip("High concentration in few customers = high revenue risk. A healthy portfolio spreads revenue across many accounts.", "#8C3D3D")
+
+        cust_fob = cur_df.groupby("customer_name").agg(
+            fob=("total_price","sum"), ships=("shipment_id","nunique"),
+            units=("total_quantity","sum"), countries=("country","nunique")).reset_index()
+        cust_fob = cust_fob.sort_values("fob", ascending=False).reset_index(drop=True)
+        total_fob_cur = safe_float(cust_fob["fob"].sum())
+        cust_fob["share_%"]   = cust_fob["fob"] / total_fob_cur * 100 if total_fob_cur else 0
+        cust_fob["cumulative_%"] = cust_fob["share_%"].cumsum()
+
+        # How many customers = 80% of revenue?
+        top80 = (cust_fob["cumulative_%"] <= 80).sum() + 1
+        info_strip(f"<strong>{top80} customer{'s' if top80!=1 else ''}</strong> account for 80% of your current FOB. "
+                   f"Total active customers this period: <strong>{len(cust_fob)}</strong>.", "#4A6080")
+
+        fig_conc = px.bar(cust_fob.head(20), x="customer_name", y="fob",
+                          labels={"customer_name":"Customer","fob":"FOB (USD)"},
+                          color="share_%", color_continuous_scale=["#F0EAE2","#8C3D3D"])
+        fig_conc.update_yaxes(tickprefix="$ ")
+        fig_conc.update_xaxes(tickangle=-35)
+        fig_conc.update_coloraxes(colorbar_title="Share %")
+        plotly_layout(fig_conc, height=320)
+        st.plotly_chart(fig_conc, use_container_width=True)
+
+        divider()
+        section_label("Top Growing & Declining Customers", "#2D4A3E")
+
+        if not prev_df.empty:
+            cust_prev = prev_df.groupby("customer_name").agg(fob_prev=("total_price","sum")).reset_index()
+            cust_comp = cust_fob[["customer_name","fob"]].merge(cust_prev, on="customer_name", how="outer").fillna(0)
+            cust_comp["chg_pct"] = cust_comp.apply(lambda r: pct_change(r["fob"], r["fob_prev"]), axis=1)
+            cust_comp = cust_comp[cust_comp["fob"] > 0].dropna(subset=["chg_pct"])
+            cust_comp = cust_comp.sort_values("chg_pct", ascending=False)
+
+            top5   = cust_comp.head(5)
+            bot5   = cust_comp.tail(5).sort_values("chg_pct")
+
+            col_g, col_d = st.columns(2)
+            with col_g:
+                st.markdown('<div style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.14em;text-transform:uppercase;color:#2D4A3E;margin-bottom:8px;border-bottom:2px solid #2D4A3E;padding-bottom:6px;">Top 5 Growing</div>', unsafe_allow_html=True)
+                for _, r in top5.iterrows():
+                    st.markdown(f'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #EDE9E3;"><span style="font-size:.84rem;color:#1A1A1A;">{r["customer_name"]}</span><span style="font-size:.82rem;font-weight:500;color:#2D4A3E;">{r["chg_pct"]:+.1f}%  ·  $ {safe_float(r["fob"]):,.0f}</span></div>', unsafe_allow_html=True)
+            with col_d:
+                st.markdown('<div style="font-family:Jost,sans-serif;font-size:.65rem;letter-spacing:.14em;text-transform:uppercase;color:#8C3D3D;margin-bottom:8px;border-bottom:2px solid #8C3D3D;padding-bottom:6px;">Top 5 Declining</div>', unsafe_allow_html=True)
+                for _, r in bot5.iterrows():
+                    st.markdown(f'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #EDE9E3;"><span style="font-size:.84rem;color:#1A1A1A;">{r["customer_name"]}</span><span style="font-size:.82rem;font-weight:500;color:#8C3D3D;">{r["chg_pct"]:+.1f}%  ·  $ {safe_float(r["fob"]):,.0f}</span></div>', unsafe_allow_html=True)
+        else:
+            st.info("Need prior-year data to show growth/decline rankings.")
+
+        divider()
+        section_label("New Customer Tracking", "#B8924A")
+        info_strip("Customers with no activity in prior years — tracked from their first order week.", "#B8924A")
+
+        all_prev = dff[dff["delivery_year"] < cur_year]["customer_name"].unique()
+        new_custs = cur_df[~cur_df["customer_name"].isin(all_prev)]
+
+        if not new_custs.empty:
+            nc_grp = new_custs.groupby("customer_name").agg(
+                first_week=("delivery_week","min"),
+                weeks_active=("delivery_week","nunique"),
+                fob=("total_price","sum"),
+                ships=("shipment_id","nunique"),
+                countries=("country", lambda x: ", ".join(sorted(x.unique())))).reset_index()
+            nc_grp = nc_grp.sort_values("fob", ascending=False)
+            nc_grp["FOB"] = nc_grp["fob"].apply(lambda x: f"$ {x:,.0f}")
+            st.dataframe(nc_grp[["customer_name","first_week","weeks_active","ships","FOB","countries"]].rename(columns={
+                "customer_name":"Customer","first_week":"First Week","weeks_active":"Active Weeks",
+                "ships":"Shipments","countries":"Countries"}),
+                use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No new customers in {cur_year} compared to prior years.")
+
+        divider()
+        section_label(f"Weekly Run-Rate  ·  {cur_year} vs {prev_year}", "#4A6080")
+        info_strip("Compare each individual week this year vs the same week last year — spot exactly which weeks are ahead or behind.", "#4A6080")
+
+        if not prev_df.empty:
+            wk_cur  = cur_df.groupby("delivery_week").agg(fob_cur=("total_price","sum")).reset_index()
+            wk_prev = prev_df.groupby("delivery_week").agg(fob_prev=("total_price","sum")).reset_index()
+            wk_rr   = wk_cur.merge(wk_prev, on="delivery_week", how="outer").fillna(0)
+            wk_rr   = wk_rr.sort_values("delivery_week")
+            wk_rr["diff"]   = wk_rr["fob_cur"] - wk_rr["fob_prev"]
+            wk_rr["color"]  = wk_rr["diff"].apply(lambda x: "#2D4A3E" if x >= 0 else "#8C3D3D")
+
+            fig_rr = go.Figure()
+            fig_rr.add_bar(x=wk_rr["delivery_week"], y=wk_rr["fob_prev"],
+                           name=f"{prev_year}", marker_color="#DDD8D0")
+            fig_rr.add_bar(x=wk_rr["delivery_week"], y=wk_rr["fob_cur"],
+                           name=f"{cur_year}", marker_color="#8C3D3D")
+            fig_rr.update_layout(barmode="overlay", bargroupgap=0.1)
+            fig_rr.update_yaxes(tickprefix="$ ")
+            fig_rr.update_xaxes(title="ISO Week")
+            plotly_layout(fig_rr, height=300)
+            st.plotly_chart(fig_rr, use_container_width=True)
+
+            wk_rr["Week"]       = wk_rr["delivery_week"].apply(lambda w: f"W{int(w)}")
+            wk_rr[f"FOB {cy}"]  = wk_rr["fob_cur"].apply(lambda x: f"$ {x:,.0f}")
+            wk_rr[f"FOB {py}"]  = wk_rr["fob_prev"].apply(lambda x: f"$ {x:,.0f}")
+            wk_rr["Difference"] = wk_rr["diff"].apply(lambda x: f"{'▲' if x>=0 else '▼'} $ {abs(x):,.0f}")
+            st.dataframe(wk_rr[["Week", f"FOB {cy}", f"FOB {py}", "Difference"]], use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No {prev_year} data available for run-rate comparison.")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 4 — PRODUCT MIX
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[3]:
+        section_label(f"Product Mix Analysis  ·  {scope_lbl}  ·  {cur_year}", "#2D4A3E")
+        info_strip("Understand which crops and varieties drive your FOB — and how the mix has shifted vs prior year.", "#2D4A3E")
+
+        has_crop = "crop_name" in cur_df.columns and cur_df["crop_name"].astype(str).str.strip().ne("").any()
+        has_var  = "variety_name" in cur_df.columns and cur_df["variety_name"].astype(str).str.strip().ne("").any()
+
+        if has_crop:
+            crop_grp = cur_df[cur_df["crop_name"].astype(str).str.strip()!=""].groupby("crop_name").agg(
+                fob=("total_price","sum"), units=("total_quantity","sum"),
+                customers=("customer_name","nunique"), countries=("country","nunique")).reset_index()
+            crop_grp = crop_grp.sort_values("fob", ascending=False)
+            total_crop_fob = safe_float(crop_grp["fob"].sum())
+            crop_grp["share_%"] = crop_grp["fob"] / total_crop_fob * 100 if total_crop_fob else 0
+
+            col_pie, col_bar = st.columns(2)
+            with col_pie:
+                fig_pie = px.pie(crop_grp, names="crop_name", values="fob",
+                                 color_discrete_sequence=PALETTE,
+                                 hole=0.45)
+                fig_pie.update_traces(textposition="outside", textinfo="label+percent")
+                fig_pie.update_layout(showlegend=False, margin=dict(l=0,r=0,t=20,b=0),
+                                      paper_bgcolor="rgba(0,0,0,0)", font_family="Jost",
+                                      font_color="#1A1A1A", height=300)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            with col_bar:
+                fig_crop = px.bar(crop_grp, x="crop_name", y="fob",
+                                  color="share_%", color_continuous_scale=["#F0EAE2","#8C3D3D"],
+                                  labels={"crop_name":"Crop","fob":"FOB (USD)"})
+                fig_crop.update_yaxes(tickprefix="$ ")
+                fig_crop.update_coloraxes(showscale=False)
+                plotly_layout(fig_crop, height=300)
+                st.plotly_chart(fig_crop, use_container_width=True)
+
+            # YoY crop comparison
+            if not prev_df.empty and has_crop:
+                divider()
+                section_label(f"Crop Mix Shift  ·  {cur_year} vs {prev_year}")
+                crop_prev = prev_df[prev_df["crop_name"].astype(str).str.strip()!=""].groupby("crop_name").agg(fob_prev=("total_price","sum")).reset_index()
+                crop_comp = crop_grp[["crop_name","fob"]].merge(crop_prev, on="crop_name", how="outer").fillna(0)
+                crop_comp["chg"] = crop_comp.apply(lambda r: pct_change(r["fob"], r["fob_prev"]), axis=1)
+                crop_comp = crop_comp.sort_values("fob", ascending=False)
+                crop_comp[f"FOB {cy}"]  = crop_comp["fob"].apply(lambda x: f"$ {x:,.0f}")
+                crop_comp[f"FOB {py}"]  = crop_comp["fob_prev"].apply(lambda x: f"$ {x:,.0f}" if x else "—")
+                crop_comp["Change"]     = crop_comp["chg"].apply(lambda x: f"{x:+.1f}%" if x is not None else "—")
+                st.dataframe(crop_comp[["crop_name",f"FOB {cy}",f"FOB {py}","Change"]].rename(columns={"crop_name":"Crop"}), use_container_width=True, hide_index=True)
+        else:
+            st.info("No crop data found. Ensure the `crop_name` column is populated.")
+
+        if has_var:
+            divider()
+            section_label(f"Top Varieties by FOB  ·  {cur_year}")
+            var_grp = cur_df[cur_df["variety_name"].astype(str).str.strip()!=""].groupby(["crop_name","variety_name"]).agg(
+                fob=("total_price","sum"), units=("total_quantity","sum"),
+                customers=("customer_name","nunique")).reset_index()
+            var_grp = var_grp.sort_values("fob", ascending=False).head(25)
+            var_grp["label"] = var_grp["variety_name"] + " (" + var_grp["crop_name"] + ")"
+            fig_var = px.bar(var_grp, x="fob", y="label", orientation="h",
+                             labels={"fob":"FOB (USD)","label":""},
+                             color_discrete_sequence=["#2D4A3E"])
+            fig_var.update_xaxes(tickprefix="$ ")
+            fig_var.update_layout(yaxis=dict(autorange="reversed"))
+            plotly_layout(fig_var, height=max(300, len(var_grp)*26))
+            st.plotly_chart(fig_var, use_container_width=True)
+
+            # Customer × variety
+            divider()
+            section_label("Product Mix per Customer  ·  Top 15 Customers")
+            top_custs = cur_df.groupby("customer_name")["total_price"].sum().nlargest(15).index.tolist()
+            cust_var = cur_df[cur_df["customer_name"].isin(top_custs) & cur_df["variety_name"].astype(str).str.strip().ne("")].groupby(
+                ["customer_name","variety_name"]).agg(fob=("total_price","sum")).reset_index()
+            if not cust_var.empty:
+                fig_cv = px.bar(cust_var, x="customer_name", y="fob", color="variety_name",
+                                labels={"customer_name":"Customer","fob":"FOB (USD)","variety_name":"Variety"},
+                                color_discrete_sequence=PALETTE)
+                fig_cv.update_yaxes(tickprefix="$ ")
+                fig_cv.update_xaxes(tickangle=-35)
+                plotly_layout(fig_cv, height=380)
+                st.plotly_chart(fig_cv, use_container_width=True)
+
+        if not has_crop and not has_var:
+            st.info("No crop or variety data found in the dataset.")
+
+        divider()
+        section_label(f"FOB per Unit Trend  ·  Price Realisation")
+        info_strip("Are we growing FOB through volume, price, or both? A rising FOB/unit means better price realisation; flat or falling means growth is purely volume.", "#4A6080")
+
+        fpu = dff.groupby("delivery_year").agg(fob=("total_price","sum"), units=("total_quantity","sum")).reset_index()
+        fpu["fob_per_unit"] = fpu.apply(lambda r: safe_float(r["fob"]) / safe_float(r["units"]) if safe_float(r["units"]) > 0 else 0, axis=1)
+        fpu["Year"] = fpu["delivery_year"].astype(str)
+        col_v, col_p = st.columns(2)
+        with col_v:
+            fig_vol = px.bar(fpu, x="Year", y="units", labels={"units":"Units Shipped","Year":""},
+                             color_discrete_sequence=["#B8924A"])
+            plotly_layout(fig_vol, height=240)
+            st.plotly_chart(fig_vol, use_container_width=True)
+        with col_p:
+            fig_fpu = px.bar(fpu, x="Year", y="fob_per_unit", labels={"fob_per_unit":"FOB / Unit (USD)","Year":""},
+                             color_discrete_sequence=["#2D4A3E"])
+            fig_fpu.update_yaxes(tickprefix="$ ")
+            plotly_layout(fig_fpu, height=240)
+            st.plotly_chart(fig_fpu, use_container_width=True)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 5 — SEASONALITY
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[4]:
+        section_label(f"Seasonality Heatmap  ·  FOB by Week  ·  {cur_year}", "#4A6080")
+        info_strip("Which weeks are your strongest? Use this to plan inventory, staffing, and commercial push timing.", "#4A6080")
+
+        # Country × Week heatmap
+        season = cur_df.groupby(["country","delivery_week"]).agg(fob=("total_price","sum")).reset_index()
+        if not season.empty:
+            heat_piv = season.pivot_table(index="country", columns="delivery_week", values="fob", aggfunc="sum").fillna(0)
+            top_countries = heat_piv.sum(axis=1).nlargest(15).index
+            heat_piv = heat_piv.loc[top_countries]
+
+            fig_sea = go.Figure(data=go.Heatmap(
+                z=heat_piv.values,
+                x=[f"W{int(w)}" for w in heat_piv.columns],
+                y=heat_piv.index.tolist(),
+                colorscale=[[0,"#F5F2ED"],[0.3,"#F0EAE2"],[0.6,"#C47A7A"],[1,"#5C1F1F"]],
+                hoverongaps=False,
+                hovertemplate="Country: %{y}<br>Week: %{x}<br>FOB: $ %{z:,.0f}<extra></extra>",
+            ))
+            fig_sea.update_layout(
+                plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+                font_family="Jost", font_color="#1A1A1A",
+                margin=dict(l=0,r=0,t=16,b=0),
+                height=max(300, len(top_countries)*32),
+                xaxis=dict(side="top", tickfont=dict(size=10, color="#4A4A4A")),
+                yaxis=dict(tickfont=dict(size=11, color="#1A1A1A")),
+            )
+            st.plotly_chart(fig_sea, use_container_width=True)
+
+        divider()
+        section_label(f"Strongest Weeks by FOB  ·  {cur_year}")
+        wk_total = cur_df.groupby("delivery_week").agg(fob=("total_price","sum"), ships=("shipment_id","nunique"), customers=("customer_name","nunique")).reset_index()
+        wk_total = wk_total.sort_values("fob", ascending=False).head(10)
+        wk_total["Week"]       = wk_total["delivery_week"].apply(lambda w: week_label(cur_year, int(w)))
+        wk_total["FOB"]        = wk_total["fob"].apply(lambda x: f"$ {x:,.0f}")
+        wk_total["Shipments"]  = wk_total["ships"]
+        wk_total["Customers"]  = wk_total["customers"]
+        st.dataframe(wk_total[["Week","FOB","Shipments","Customers"]], use_container_width=True, hide_index=True)
+
+        if not prev_df.empty:
+            divider()
+            section_label(f"Week-by-Week Comparison  ·  {cur_year} vs {prev_year}")
+            wk_sea_prev = prev_df.groupby("delivery_week").agg(fob_prev=("total_price","sum")).reset_index()
+            wk_sea_cur  = cur_df.groupby("delivery_week").agg(fob_cur=("total_price","sum")).reset_index()
+            wk_sea_mrg  = wk_sea_cur.merge(wk_sea_prev, on="delivery_week", how="outer").fillna(0).sort_values("delivery_week")
+            fig_wk = go.Figure()
+            fig_wk.add_trace(go.Scatter(x=wk_sea_mrg["delivery_week"], y=wk_sea_mrg["fob_prev"],
+                                        name=str(prev_year), line=dict(color="#DDD8D0", width=2), mode="lines"))
+            fig_wk.add_trace(go.Scatter(x=wk_sea_mrg["delivery_week"], y=wk_sea_mrg["fob_cur"],
+                                        name=str(cur_year), line=dict(color="#8C3D3D", width=2.5), mode="lines+markers", marker_size=4))
+            fig_wk.update_yaxes(tickprefix="$ ")
+            fig_wk.update_xaxes(title="ISO Week")
+            plotly_layout(fig_wk, height=300)
+            st.plotly_chart(fig_wk, use_container_width=True)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 6 — ORIGIN MIX
+    # ════════════════════════════════════════════════════════════════════════
+    with ci_tabs[5]:
+        section_label(f"Origin Mix Analysis  ·  {scope_lbl}  ·  {cur_year}", "#B8924A")
+        info_strip("Which supply origins feed which destination markets? Use this to spot over-reliance on a single source and identify diversification opportunities.", "#B8924A")
+
+        orig_grp = cur_df.groupby("supply_source_name").agg(
+            fob=("total_price","sum"), ships=("shipment_id","nunique"),
+            units=("total_quantity","sum"), countries=("country","nunique"),
+            customers=("customer_name","nunique")).reset_index()
+        orig_grp = orig_grp.sort_values("fob", ascending=False)
+        total_orig_fob = safe_float(orig_grp["fob"].sum())
+        orig_grp["share_%"] = orig_grp["fob"] / total_orig_fob * 100 if total_orig_fob else 0
+
+        oc1, oc2 = st.columns(2)
+        with oc1:
+            fig_opie = px.pie(orig_grp, names="supply_source_name", values="fob",
+                              color_discrete_sequence=PALETTE, hole=0.45,
+                              labels={"supply_source_name":"Origin"})
+            fig_opie.update_traces(textposition="outside", textinfo="label+percent")
+            fig_opie.update_layout(showlegend=False, margin=dict(l=0,r=0,t=20,b=0),
+                                   paper_bgcolor="rgba(0,0,0,0)", font_family="Jost",
+                                   font_color="#1A1A1A", height=300)
+            st.plotly_chart(fig_opie, use_container_width=True)
+        with oc2:
+            orig_grp_disp = orig_grp.copy()
+            orig_grp_disp["FOB"]       = orig_grp_disp["fob"].apply(lambda x: f"$ {x:,.0f}")
+            orig_grp_disp["Share"]     = orig_grp_disp["share_%"].apply(lambda x: f"{x:.1f}%")
+            orig_grp_disp["Shipments"] = orig_grp_disp["ships"]
+            orig_grp_disp["Countries"] = orig_grp_disp["countries"]
+            orig_grp_disp["Customers"] = orig_grp_disp["customers"]
+            st.dataframe(orig_grp_disp[["supply_source_name","FOB","Share","Shipments","Countries","Customers"]].rename(
+                columns={"supply_source_name":"Origin"}), use_container_width=True, hide_index=True)
+
+        divider()
+        section_label("Origin → Destination Flow")
+        orig_dest = cur_df.groupby(["supply_source_name","country"]).agg(fob=("total_price","sum")).reset_index()
+        orig_dest = orig_dest[orig_dest["fob"] > 0]
+        if not orig_dest.empty:
+            fig_od = px.bar(orig_dest, x="country", y="fob", color="supply_source_name",
+                            barmode="stack",
+                            labels={"country":"Destination","fob":"FOB (USD)","supply_source_name":"Origin"},
+                            color_discrete_sequence=PALETTE)
+            fig_od.update_yaxes(tickprefix="$ ")
+            fig_od.update_xaxes(tickangle=-35)
+            plotly_layout(fig_od, height=380)
+            st.plotly_chart(fig_od, use_container_width=True)
+
+        divider()
+        section_label("Origin YoY Comparison")
+        if not prev_df.empty:
+            orig_prev = prev_df.groupby("supply_source_name").agg(fob_prev=("total_price","sum")).reset_index()
+            orig_comp = orig_grp[["supply_source_name","fob"]].merge(orig_prev, on="supply_source_name", how="outer").fillna(0)
+            orig_comp["chg"] = orig_comp.apply(lambda r: pct_change(r["fob"], r["fob_prev"]), axis=1)
+            orig_comp = orig_comp.sort_values("fob", ascending=False)
+            orig_comp[f"FOB {cy}"]  = orig_comp["fob"].apply(lambda x: f"$ {x:,.0f}")
+            orig_comp[f"FOB {py}"]  = orig_comp["fob_prev"].apply(lambda x: f"$ {x:,.0f}" if x else "—")
+            orig_comp["Change"]     = orig_comp["chg"].apply(lambda x: f"{x:+.1f}%" if x is not None else "—")
+            orig_comp["Status"]     = orig_comp.apply(lambda r: status_badge(r["chg"], r["fob"]), axis=1)
+            st.dataframe(orig_comp[["supply_source_name",f"FOB {cy}",f"FOB {py}","Change","Status"]].rename(
+                columns={"supply_source_name":"Origin"}), use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No {prev_year} data for origin comparison.")
+
+        divider()
+        section_label("Weekly Origin Activity  ·  Heatmap")
+        orig_wk = cur_df.groupby(["supply_source_name","delivery_week"]).agg(fob=("total_price","sum")).reset_index()
+        if not orig_wk.empty:
+            orig_heat = orig_wk.pivot_table(index="supply_source_name", columns="delivery_week", values="fob", aggfunc="sum").fillna(0)
+            fig_oh = go.Figure(data=go.Heatmap(
+                z=orig_heat.values,
+                x=[f"W{int(w)}" for w in orig_heat.columns],
+                y=orig_heat.index.tolist(),
+                colorscale=[[0,"#F5F2ED"],[0.3,"#D4B070"],[1,"#5C2D00"]],
+                hoverongaps=False,
+                hovertemplate="Origin: %{y}<br>Week: %{x}<br>FOB: $ %{z:,.0f}<extra></extra>",
+            ))
+            fig_oh.update_layout(
+                plot_bgcolor="#FFFFFF", paper_bgcolor="rgba(0,0,0,0)",
+                font_family="Jost", font_color="#1A1A1A",
+                margin=dict(l=0,r=0,t=16,b=0),
+                height=max(200, len(orig_heat)*40),
+                xaxis=dict(side="top", tickfont=dict(size=10, color="#4A4A4A")),
+                yaxis=dict(tickfont=dict(size=11, color="#1A1A1A")),
+            )
+            st.plotly_chart(fig_oh, use_container_width=True)
+
+    return  # end render_commercial
 
     page_header("Commercial Intelligence",
                 "Year-over-Year Performance  ·  Growth Analysis  ·  Market Focus")
@@ -1061,21 +2629,233 @@ def render_logistics(df_all):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# AUTH — uses secrets.toml on Streamlit Cloud, plain comparison elsewhere
+# ════════════════════════════════════════════════════════════════════════════
+USERS_FILE = pathlib.Path(".streamlit/users.json")
+
+# ── Hardcoded users dict — always works, no hashing at startup ───────────────
+# Passwords stored as plain text here ONLY as a bootstrap fallback.
+# Once you set secrets.toml these are ignored.
+_BUILTIN_USERS = {
+    "admin":      {"password": "admin123",   "display": "Administrator", "role": "admin"},
+    "logistics":  {"password": "log2024",    "display": "Logistics",     "role": "user"},
+    "commercial": {"password": "com2024",    "display": "Commercial",    "role": "user"},
+}
+
+def _get_users() -> dict:
+    """
+    Returns dict of {username: {password, display, role}}.
+    Passwords are plain text — compared directly, no hashing required.
+    Priority: secrets.toml → users.json → _BUILTIN_USERS
+    """
+    # 1 ── Streamlit secrets (Streamlit Cloud)
+    try:
+        raw = st.secrets.get("users", {})
+        if raw:
+            out = {}
+            for u, v in raw.items():
+                u = str(u).strip().lower()
+                if isinstance(v, str):
+                    out[u] = {"password": v, "display": u.title(), "role": "user"}
+                else:
+                    out[u] = {
+                        "password": str(v.get("password", "")),
+                        "display":  str(v.get("display",  u.title())),
+                        "role":     str(v.get("role",     "user")),
+                    }
+            if out:
+                return out
+    except Exception:
+        pass
+
+    # 2 ── Local JSON file (self-hosted / local dev)
+    if USERS_FILE.exists():
+        try:
+            data = json.loads(USERS_FILE.read_text())
+            if data:
+                return data
+        except Exception:
+            pass
+
+    # 3 ── Built-in fallback (always works)
+    return dict(_BUILTIN_USERS)
+
+def _save_users(users: dict):
+    try:
+        USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        USERS_FILE.write_text(json.dumps(users, indent=2))
+    except Exception:
+        pass  # read-only on Streamlit Cloud — that's fine, secrets.toml is used there
+
+def check_credentials(username: str, password: str) -> bool:
+    if not username or not password:
+        return False
+    users = _get_users()
+    u = username.strip().lower()
+    if u not in users:
+        return False
+    stored = users[u].get("password", "")
+    return stored == password.strip()
+
+def get_user(username: str) -> dict:
+    users = _get_users()
+    return users.get(username.strip().lower(),
+                     {"display": username.title(), "role": "user"})
+
+# ── Login screen ──────────────────────────────────────────────────────────────
+def render_login():
+    components.html("""<style>
+    html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],
+    [data-testid="stMain"],[data-testid="stMainBlockContainer"],
+    .main,.block-container{background-color:#F5F2ED!important;}
+    </style>""", height=0)
+
+    st.markdown("""
+    <div style="text-align:center;padding:60px 0 32px 0;">
+      <div style="font-family:'Cormorant Garamond',serif;font-size:2.8rem;font-weight:400;
+                  color:#1A1A1A;letter-spacing:.02em;">✦ Export Ops</div>
+      <div style="font-family:'Jost',sans-serif;font-size:.65rem;letter-spacing:.22em;
+                  text-transform:uppercase;color:#7A7A7A;margin-top:8px;">Management Suite</div>
+    </div>""", unsafe_allow_html=True)
+
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        st.markdown("""
+        <div style="background:#FFFFFF;border:1px solid #DDD8D0;border-top:3px solid #8C3D3D;
+                    padding:32px 32px 24px 32px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:500;
+                      color:#1A1A1A;">Sign in</div>
+          <div style="font-family:'Jost',sans-serif;font-size:.78rem;color:#7A7A7A;
+                      margin-top:4px;margin-bottom:20px;">
+            Enter your credentials to continue
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        with st.form("login_form"):
+            username = st.text_input("Username", placeholder="username")
+            password = st.text_input("Password", placeholder="••••••••", type="password")
+            submitted = st.form_submit_button("Sign In →", use_container_width=True)
+
+        if submitted:
+            if check_credentials(username, password):
+                st.session_state["authenticated"] = True
+                st.session_state["username"]      = username.strip().lower()
+                st.session_state["login_failed"]  = False
+                st.rerun()
+            else:
+                st.session_state["login_failed"] = True
+
+        if st.session_state.get("login_failed"):
+            st.markdown("""
+            <div style="background:#FFF5F5;border-left:3px solid #8C3D3D;padding:10px 14px;
+                        font-family:'Jost',sans-serif;font-size:.78rem;color:#8C3D3D;
+                        margin-top:8px;">
+              Incorrect username or password.
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("""
+        <div style="font-family:'Jost',sans-serif;font-size:.70rem;color:#9A9A9A;
+                    text-align:center;margin-top:16px;padding-bottom:8px;">
+          Access restricted to authorised personnel.
+        </div>""", unsafe_allow_html=True)
+
+# ── Admin panel ───────────────────────────────────────────────────────────────
+def render_admin():
+    page_header("User Management", "Add · Edit · Remove Users")
+    users = _get_users()
+
+    section_label("Current Users", "#8C3D3D")
+    rows = [{"Username": u, "Display Name": v["display"], "Role": v["role"]}
+            for u, v in users.items()]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    divider()
+
+    section_label("Add or Update User", "#2D4A3E")
+    c1, c2, c3, c4 = st.columns(4)
+    new_user    = c1.text_input("Username",     key="adm_user",    placeholder="e.g. maria")
+    new_display = c2.text_input("Display Name", key="adm_display", placeholder="e.g. María")
+    new_pw      = c3.text_input("Password",     key="adm_pw",      type="password", placeholder="Password")
+    new_role    = c4.selectbox("Role",          ["user", "admin"],  key="adm_role")
+    if st.button("Save User", key="adm_save"):
+        u = new_user.strip().lower()
+        if not u:
+            st.warning("Username cannot be empty.")
+        elif not new_pw and u not in users:
+            st.warning("Password required for new users.")
+        else:
+            users[u] = {
+                "password": new_pw if new_pw else users.get(u, {}).get("password", ""),
+                "display":  new_display.strip() or u.title(),
+                "role":     new_role,
+            }
+            _save_users(users)
+            st.success(f"User **{u}** saved.")
+            st.rerun()
+    divider()
+
+    section_label("Remove User", "#B8924A")
+    removable = [u for u in users if u != st.session_state.get("username")]
+    if removable:
+        del_user = st.selectbox("Select user to remove", removable, key="adm_del")
+        if st.button("Remove User", key="adm_del_btn"):
+            del users[del_user]
+            _save_users(users)
+            st.success(f"User **{del_user}** removed.")
+            st.rerun()
+    else:
+        st.info("No other users to remove.")
+    divider()
+
+    section_label("Change My Password", "#4A6080")
+    cp1, cp2 = st.columns(2)
+    cur_pw  = cp1.text_input("Current password", type="password", key="cp_cur")
+    new_pw2 = cp2.text_input("New password",     type="password", key="cp_new")
+    if st.button("Update Password", key="cp_btn"):
+        me = st.session_state.get("username", "")
+        if not check_credentials(me, cur_pw):
+            st.error("Current password is incorrect.")
+        elif len(new_pw2) < 6:
+            st.warning("Password must be at least 6 characters.")
+        else:
+            users[me]["password"] = new_pw2
+            _save_users(users)
+            st.success("Password updated.")
+
+# ── Auth gate ─────────────────────────────────────────────────────────────────
+if not st.session_state.get("authenticated", False):
+    render_login()
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("""
+    current_user = get_user(st.session_state.get("username", ""))
+    display_name = current_user["display"]
+    is_admin     = current_user["role"] == "admin"
+
+    st.markdown(f"""
     <div style="padding:32px 0 6px 0;">
       <div style="font-family:'Cormorant Garamond',serif;font-size:1.55rem;font-weight:400;
                   color:#F5EDE8;letter-spacing:.04em;line-height:1.2;">✦ Export Ops</div>
       <div style="font-family:Jost,sans-serif;font-size:.62rem;letter-spacing:.2em;
                   text-transform:uppercase;color:#C4A090;margin-top:4px;">Management Suite</div>
     </div>
-    <div style="border-top:1px solid rgba(212,176,168,.25);margin:16px 0 20px 0;"></div>
+    <div style="border-top:1px solid rgba(212,176,168,.25);margin:14px 0 10px 0;"></div>
+    <div style="font-family:Jost,sans-serif;font-size:.74rem;color:#D4B8B0;padding-bottom:14px;">
+      <span style="color:#C4A090;font-size:.60rem;letter-spacing:.12em;text-transform:uppercase;">Signed in as</span><br>
+      <span style="color:#F5EDE8;font-weight:500;">{display_name}</span>
+    </div>
+    <div style="border-top:1px solid rgba(212,176,168,.25);margin:0 0 16px 0;"></div>
     """, unsafe_allow_html=True)
 
     st.markdown('<p style="font-family:Jost,sans-serif;font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;color:#C4A090;margin-bottom:8px;">Navigation</p>', unsafe_allow_html=True)
-    page = st.radio("page_nav", ["📦  Logistics", "📈  Commercial Intelligence"],
+
+    nav_options = ["📦  Logistics", "📈  Commercial Intelligence"]
+    if is_admin:
+        nav_options.append("👤  User Management")
+
+    page = st.radio("page_nav", nav_options,
                     label_visibility="collapsed", key="page_selector")
 
     st.markdown('<div style="border-top:1px solid rgba(212,176,168,.25);margin:20px 0;"></div>', unsafe_allow_html=True)
@@ -1102,6 +2882,14 @@ with st.sidebar:
             customers = st.multiselect("Customer", sorted(st.session_state.df["customer_name"].dropna().unique()),       placeholder="All customers", key="log_customers")
             st.session_state.origins   = origins
             st.session_state.customers = customers
+
+    # Sign out
+    st.sidebar.markdown('<div style="border-top:1px solid rgba(212,176,168,.25);margin:24px 0 12px 0;"></div>', unsafe_allow_html=True)
+    if st.sidebar.button("Sign Out", key="signout_btn"):
+        for k in ["authenticated","username","login_failed","df","filename",
+                  "loaded_at","origins","customers"]:
+            st.session_state.pop(k, None)
+        st.rerun()
 
 
 # ── File processing ───────────────────────────────────────────────────────────
@@ -1172,10 +2960,15 @@ if "df" not in st.session_state or st.session_state.df is None:
 
 # ── Routing ───────────────────────────────────────────────────────────────────
 if page == "📈  Commercial Intelligence":
-    render_commercial(st.session_state.df.copy())
+    render_commercial(st.session_state.df.copy() if "df" in st.session_state and st.session_state.df is not None else pd.DataFrame())
+elif page == "👤  User Management":
+    if is_admin:
+        render_admin()
+    else:
+        st.error("Access denied.")
 else:
     df_log = apply_filters(
-        st.session_state.df.copy(),
+        st.session_state.df.copy() if "df" in st.session_state and st.session_state.df is not None else pd.DataFrame(),
         st.session_state.get("origins", []),
         st.session_state.get("customers", [])
     )
